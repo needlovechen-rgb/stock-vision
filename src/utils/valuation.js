@@ -30,76 +30,37 @@ export const calculateValuation = (data, assumptions = { growthRate: 0.05, disco
     return { ttmEps };
   });
 
-  // Calculate annual midpoints for calibration (Midpoint-based Consensus)
+  // Placeholder stats - will be populated by final calibrated values from the river loop
+  let finalPe = {};
+  let finalPb = {};
+  let finalDcf = {};
+
+  // 1. P/E Calibration (Consensus-based)
   const yearlyMidPEs = [];
   const years = [...new Set(data.map(d => d.quarter?.split('-')[0]).filter(Boolean))];
-  
   years.forEach(yr => {
     const yrData = data.filter(d => d.quarter?.startsWith(yr));
     if (yrData.length === 0) return;
     const yrHigh = Math.max(...yrData.map(d => d.high || d.price));
     const yrLow = Math.min(...yrData.map(d => d.low || d.price));
     const yrEps = yrData.reduce((acc, d) => acc + (d.eps || 0), 0);
-    if (yrEps > 0.1) {
-      yearlyMidPEs.push(((yrHigh + yrLow) / 2) / yrEps);
-    }
+    if (yrEps > 0.1) yearlyMidPEs.push(((yrHigh + yrLow) / 2) / yrEps);
   });
+  const validPE = yearlyMidPEs.sort((a, b) => a - b);
+  let avgPE = validPE.length > 0 ? validPE[Math.floor(validPE.length / 2)] : 15;
+  if (avgPE > 25) avgPE = 20 + (avgPE - 20) * 0.3;
+  const minPE = avgPE * 0.7;
+  const maxPE = avgPE * 1.3;
 
-  const validPE = yearlyMidPEs.sort((a, b) => a - b); 
-  let avgPE = validPE.length > 0 ? validPE[Math.floor(validPE.length / 2)] : 15; 
-  
-  // Safety: Cap the multiplier to avoid euphoria skews (Industry Standard Cap for consistency)
-  // If the median is higher than 25x but it's not a consistent growth stock, cap it or blend it.
-  if (avgPE > 25) avgPE = 20 + (avgPE - 20) * 0.3; // Dampen extremes above 25x
-
-  const minPE = avgPE * 0.7; // Cheap is 30% below historical consensus
-  const maxPE = avgPE * 1.3; // Expensive is 30% above historical consensus
-
-  // Calculate a "Max Historical Reference Price" to anchor the chart lines
-  const maxHisPrice = Math.max(...data.map(d => d.high || d.price));
-
-  const peStats = {
-    fair: currentTTMEPS * avgPE,
-    cheap: currentTTMEPS * minPE,
-    expensive: currentTTMEPS * maxPE,
-    avg: avgPE, min: minPE, max: maxPE
-  };
-
-  // 2. P/B Valuation (Asset-based)
+  // 2. P/B Calibration (Asset-based)
   const currentBVPS = data[data.length - 1].bvps || 20;
   const validPB = data
     .map(d => (d.bvps > 0) ? d.price / d.bvps : null)
     .filter(pb => pb !== null && pb > 0 && pb < 10)
     .sort((a, b) => a - b);
-
   const avgPB = validPB.length > 5 ? validPB.reduce((a, b) => a + b, 0) / validPB.length : 1.2;
   const minPB = validPB.length > 5 ? validPB[Math.floor(validPB.length * 0.2)] : 0.8;
   const maxPB = validPB.length > 5 ? validPB[Math.floor(validPB.length * 0.8)] : 2.0;
-
-  const pbStats = {
-    fair: currentBVPS * avgPB,
-    cheap: currentBVPS * minPB,
-    expensive: currentBVPS * maxPB,
-    avg: avgPB, min: minPB, max: maxPB
-  };
-
-  // 3. DCF Valuation (Intrinsic)
-  const currentFCF = currentTTMEPS * 0.8; 
-  let dcfValue = 0;
-  let projectedFCF = currentFCF;
-  for (let i = 1; i <= 5; i++) {
-    projectedFCF *= (1 + assumptions.growthRate);
-    dcfValue += projectedFCF / Math.pow(1 + assumptions.discountRate, i);
-  }
-  const terminalVal = (projectedFCF * (1 + assumptions.terminalGrowth)) / (Math.max(0.01, assumptions.discountRate - assumptions.terminalGrowth));
-  dcfValue += terminalVal / Math.pow(1 + assumptions.discountRate, 5);
-
-  const dcfStats = { 
-    value: dcfValue,
-    fair: dcfValue,
-    cheap: dcfValue * 0.8,
-    expensive: dcfValue * 1.5
-  };
 
   // Append river data to historical points
   const riverData = data.map((d, i) => {
@@ -117,8 +78,21 @@ export const calculateValuation = (data, assumptions = { growthRate: 0.05, disco
     if (ttmEps <= 0) smoothFair = yrMid;
     else if (rawFair > d.yearlyHigh) smoothFair = d.yearlyHigh;
 
-    // 3. Dynamic DCF for every point in history
-    const pointFCF = ttmEps * 0.8;
+    // 3. Dynamic DCF for every point in history (Resilient Model)
+    // Normalization: If TTM EPS is negative, assume a recovery baseline 
+    // to avoid negative valuations and provide a more realistic "Intrinsic Value"
+    let baseEps = ttmEps;
+    if (baseEps <= 0) {
+      const historicalPositives = peData.slice(0, i + 1).map(p => p.ttmEps).filter(e => e > 0);
+      if (historicalPositives.length > 0) {
+        historicalPositives.sort((a, b) => a - b);
+        baseEps = historicalPositives[Math.floor(historicalPositives.length / 2)] * 0.5; 
+      } else {
+        baseEps = (d.bvps || 20) * 0.05; // 5% ROE Floor
+      }
+    }
+
+    const pointFCF = baseEps * 0.8;
     let pointDCF = 0;
     let pFCF = pointFCF;
     for (let j = 1; j <= 5; j++) {
@@ -127,6 +101,10 @@ export const calculateValuation = (data, assumptions = { growthRate: 0.05, disco
     }
     const pTerm = (pFCF * (1 + assumptions.terminalGrowth)) / (Math.max(0.01, assumptions.discountRate - assumptions.terminalGrowth));
     pointDCF += pTerm / Math.pow(1 + assumptions.discountRate, 5);
+
+    // Safety Floor: In extreme cases, a company's intrinsic value 
+    // should not be below its Book Value (Asset-based support)
+    pointDCF = Math.max(pointDCF, d.bvps || 0);
 
     return {
       ...d,
@@ -145,11 +123,10 @@ export const calculateValuation = (data, assumptions = { growthRate: 0.05, disco
     };
   });
 
-  // Use calibrated current values for the summary cards
   const currentVal = riverData[riverData.length - 1];
-  const finalPe = { ...peStats, cheap: currentVal.peCheap, fair: currentVal.peFair, expensive: currentVal.peExpensive };
-  const finalPb = { ...pbStats, cheap: currentVal.pbCheap, fair: currentVal.pbFair, expensive: currentVal.pbExpensive };
-  const finalDcf = { ...dcfStats, cheap: currentVal.dcfCheap, fair: currentVal.dcfFair, expensive: currentVal.dcfExpensive };
+  finalPe = { fair: currentVal.peFair, cheap: currentVal.peCheap, expensive: currentVal.peExpensive, avg: avgPE, min: minPE, max: maxPE };
+  finalPb = { fair: currentVal.pbFair, cheap: currentVal.pbCheap, expensive: currentVal.pbExpensive, avg: avgPB, min: minPB, max: maxPB };
+  finalDcf = { value: currentVal.dcfFair, fair: currentVal.dcfFair, cheap: currentVal.dcfCheap, expensive: currentVal.dcfExpensive };
 
   return {
     currentPrice,

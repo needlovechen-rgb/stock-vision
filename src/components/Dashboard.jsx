@@ -6,13 +6,173 @@ import {
 import { 
   Search, TrendingUp, TrendingDown, Shield, HelpCircle, Activity, BrainCircuit, 
   Calculator, Settings2, RefreshCw, Globe, Waves, Trash2, LineChart as LineChartIcon,
-  ChevronRight, AlertTriangle
+  ChevronRight, AlertTriangle, Target
 } from 'lucide-react';
 import { calculateValuation } from '../utils/valuation';
 import { 
   fetchStockData, calculateKD, calculateMACD
 } from '../utils/stockDataService';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// =============================================
+// I18n Dictionary
+// =============================================
+
+const translations = {
+  zh: {
+    syncing: "正在同步全球市場狀態...",
+    connected: "實時雲端連線已啟動",
+    hub: "AI 驅動量化中心",
+    placeholder: "輸入股票代碼...",
+    analyze: "即刻分析",
+    recent: "最近查詢",
+    loading_title: "數據讀取中...",
+    loading_sub: "正在執行並行快取機制",
+    error_title: "連線中斷或查無此股",
+    error_retry: "嘗試手動修復連線",
+    idle_title: "等待輸入...",
+    idle_sub: "請在上方輸入想查詢的股票代碼",
+    target_analysis: "標的分析",
+    etf: "(ETF)",
+    price_change: "成交價 / 漲跌",
+    bvps: "股票淨值",
+    day_range: "今日最高 / 最低",
+    month_range: "當月最高 / 最低",
+    volume: "今日成交量",
+    unit_share: "股",
+    buy: "宜買進",
+    sell: "宜賣出",
+    hold: "觀望",
+    golden: "KD 黃金交叉",
+    death: "KD 死亡交叉",
+    up: "KD 向上",
+    down: "KD 向下",
+    flat: "KD 持平",
+    intraday: "今日即時走勢 (1分)",
+    open: "今日開盤",
+    vwap: "均價(VWAP)",
+    simple_avg: "算術均價",
+    last_close: "昨收",
+    no_data: "今日暫無交易數據",
+    stats_title: "年度統計與合理價 (5年)",
+    eps_track: "長期 EPS 成長追蹤",
+    quarter_eps: "單季 EPS",
+    accumulated_eps: "年度累計",
+    river_title: "趨勢河圖 (12季)",
+    intrinsic_value: "內在價值趨勢",
+    mode_btn: "模型",
+    PE: "本益比 (PE)",
+    PB: "股價淨值比 (PB)",
+    DCF: "現金流折現 (DCF)",
+    year: "年度",
+    high: "最高",
+    low: "最低",
+    total_eps: "總盈餘",
+    book_value: "每股淨值",
+    fair_price: "合理價 (估)",
+    render_error: "系統渲染錯誤",
+    reload: "重新載入",
+    unknown_error: "未知錯誤",
+    strategy_analysis: "三合一估值與進場策略分析",
+    price_range: "價格區間",
+    dcf_signal: "DCF 信號",
+    yield_signal: "預估殖利率",
+    pb_signal: "PB 評價",
+    rating: "綜合評價",
+    strategy_action: "實戰建議",
+    entry_strategy: "進場策略 (分批佈局)",
+    exit_strategy: "出場邏輯 (停利參考)",
+    strong_buy: "強烈買進",
+    buy_signal: "分批買進",
+    hold_signal: "中性持有",
+    conservative: "保守減碼",
+    avoid: "避開風險",
+    batch_1: "第一批買進位階",
+    batch_2: "第二批加碼位階",
+    batch_3: "底部重倉位階",
+    exit_logic: "開始減碼區間",
+    overheated: "市場過熱/全部出場",
+    below: "以下",
+    above: "以上"
+  },
+  en: {
+    syncing: "Syncing global markets...",
+    connected: "Cloud connection active",
+    hub: "AI-Driven Quantitative Hub",
+    placeholder: "Enter symbol...",
+    analyze: "Analyze",
+    recent: "Recent",
+    loading_title: "Fetching Data...",
+    loading_sub: "Running parallel analysis engines",
+    error_title: "Connection Lost or Symbol Not Found",
+    error_retry: "Attempt Manual Repair",
+    idle_title: "WAITING FOR INPUT...",
+    idle_sub: "Please enter a stock symbol above",
+    target_analysis: "Target Analysis",
+    etf: "(ETF)",
+    price_change: "Price / Change",
+    bvps: "Book Value",
+    day_range: "Day High / Low",
+    month_range: "Month High / Low",
+    volume: "Volume",
+    unit_share: "sh",
+    buy: "Good to Buy",
+    sell: "Good to Sell",
+    hold: "Wait & See",
+    golden: "KD Golden Cross",
+    death: "KD Death Cross",
+    up: "KD Trending Up",
+    down: "KD Trending Down",
+    flat: "KD Flat",
+    intraday: "Intraday Trend (1m)",
+    open: "Open",
+    vwap: "VWAP",
+    simple_avg: "Avg Price",
+    last_close: "Prev Close",
+    no_data: "No Trading Data Available",
+    stats_title: "Yearly Stats & Fair Price (5Y)",
+    eps_track: "Long-term EPS Track",
+    quarter_eps: "Quarterly EPS",
+    accumulated_eps: "Yearly Accumulated",
+    river_title: "12-Quarter Trend River",
+    intrinsic_value: "Intrinsic Value Trend",
+    mode_btn: "Mode",
+    PE: "Price-to-Earnings (PE)",
+    PB: "Price-to-Book (PB)",
+    DCF: "Discounted Cash Flow (DCF)",
+    year: "Year",
+    high: "High",
+    low: "Low",
+    total_eps: "Total EPS",
+    book_value: "Book Value",
+    fair_price: "Fair Price (Est)",
+    render_error: "Render Error",
+    reload: "Reload",
+    unknown_error: "Unknown Error",
+    strategy_analysis: "3-in-1 Strategy Analysis",
+    price_range: "Price Range",
+    dcf_signal: "DCF Signal",
+    yield_signal: "Est. Yield",
+    pb_signal: "PB Level",
+    rating: "Rating",
+    strategy_action: "Action Strategy",
+    entry_strategy: "Entry Strategy (Batching)",
+    exit_strategy: "Exit Logic (Profit taking)",
+    strong_buy: "Strong Buy",
+    buy_signal: "Batch Buy",
+    hold_signal: "Hold",
+    conservative: "Reduce",
+    avoid: "Avoid/Sell",
+    batch_1: "1st Batch Entry",
+    batch_2: "2nd Batch Entry",
+    batch_3: "Bottom Loading",
+    exit_logic: "Start Reducing",
+    overheated: "Overheated/Full Exit",
+    below: "Below",
+    above: "Above"
+  }
+};
+
 
 // =============================================
 // Sub-Components (MUST be defined before Dashboard)
@@ -67,6 +227,168 @@ const IndicatorRow = ({ label, val, current, color }) => {
   );
 };
 
+const StrategyTable = ({ stockInfo, valuation, t }) => {
+  if (!stockInfo || !valuation) return null;
+
+  // 統一錨定點：優先使用 PE 合理價 (最符合市場共識)，次之 DCF，最後 PB
+  const peFair = valuation.pe?.fair;
+  const pbFair = valuation.pb?.fair;
+  const dcfFair = valuation.dcf?.fair;
+  const currentPrice = stockInfo.currentPrice;
+  
+  // 核心合理價錨點
+  const fairAnchor = peFair || dcfFair || pbFair || currentPrice;
+
+  // 估計股利 (優先使用 Yahoo 數據，若無則依據最近 3 年平均 EPS 的 70% 推估)
+  const yahooDiv = stockInfo.summary?.summaryDetail?.dividendRate?.raw || 
+                  stockInfo.summary?.summaryDetail?.trailingAnnualDividendRate?.raw || 0;
+  const avgEps3Y = (stockInfo.yearlyStats?.slice(0, 3).reduce((acc, y) => acc + (y.totalEps || 0), 0) / 
+                   Math.max(stockInfo.yearlyStats?.slice(0, 3).length, 1)) || 0;
+  const estDividend = Math.max(yahooDiv || (avgEps3Y * 0.7) || 0, 0);
+
+  const levels = [
+    {
+      id: 5,
+      label: t('avoid'),
+      price: `>${(fairAnchor * 1.25).toFixed(1)}`,
+      dcf: t('conservative'),
+      yield: (estDividend / (fairAnchor * 1.25) * 100).toFixed(1) + '%',
+      pb: (valuation.pb?.fair ? (fairAnchor * 1.25 / (valuation.pb.fair / (valuation.pb.avg || 1))).toFixed(1) : '>1.5'),
+      rating: '⭐',
+      color: 'text-slate-500',
+      bg: 'hover:bg-slate-500/10'
+    },
+    {
+      id: 4,
+      label: t('conservative'),
+      price: `${(fairAnchor * 1.1).toFixed(1)}~${(fairAnchor * 1.25).toFixed(1)}`,
+      dcf: t('hold_signal'),
+      yield: (estDividend / (fairAnchor * 1.15) * 100).toFixed(1) + '%',
+      pb: '1.2~1.5',
+      rating: '⭐⭐',
+      color: 'text-amber-400',
+      bg: 'hover:bg-amber-400/10'
+    },
+    {
+      id: 3,
+      label: t('hold_signal'),
+      price: `${(fairAnchor * 0.95).toFixed(1)}~${(fairAnchor * 1.1).toFixed(1)}`,
+      dcf: t('fair_price'),
+      yield: (estDividend / fairAnchor * 100).toFixed(1) + '%',
+      pb: '1.0~1.2',
+      rating: '⭐⭐⭐',
+      color: 'text-emerald-400',
+      bg: 'hover:bg-emerald-400/10'
+    },
+    {
+      id: 2,
+      label: t('buy_signal'),
+      price: `${(fairAnchor * 0.85).toFixed(1)}~${(fairAnchor * 0.95).toFixed(1)}`,
+      dcf: t('buy_signal'),
+      yield: (estDividend / (fairAnchor * 0.9) * 100).toFixed(1) + '%',
+      pb: '0.8~1.0',
+      rating: '⭐⭐⭐⭐',
+      color: 'text-blue-400',
+      bg: 'hover:bg-blue-400/10'
+    },
+    {
+      id: 1,
+      label: t('strong_buy'),
+      price: `<${(fairAnchor * 0.85).toFixed(1)}`,
+      dcf: t('strong_buy'),
+      yield: `>${(estDividend / (fairAnchor * 0.85) * 100).toFixed(1)}%`,
+      pb: '<0.8',
+      rating: '⭐⭐⭐⭐⭐',
+      color: 'text-rose-400',
+      bg: 'hover:bg-rose-400/10'
+    }
+  ];
+
+  return (
+    <GlassCard className="p-8 mt-8 border-l-[6px] border-l-blue-500 bg-white/[0.01]">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-white/[0.05] rounded-xl">
+            <Target size={18} className="text-blue-400" />
+          </div>
+          <h3 className="text-xl font-black italic tracking-tighter text-slate-300">{t('strategy_analysis')}</h3>
+        </div>
+        {estDividend > 0 && (
+          <div className="flex items-center gap-2 px-3 py-1 bg-teal-500/10 border border-teal-500/20 rounded-lg">
+            <span className="text-[10px] font-black text-teal-500 uppercase tracking-widest">Est. Dividend:</span>
+            <span className="text-xs font-bold text-teal-400">${estDividend.toFixed(2)}</span>
+          </div>
+        )}
+      </div>
+      
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse min-w-[700px]">
+          <thead>
+            <tr className="border-b border-white/10 text-slate-500 text-[10px] uppercase tracking-widest font-black">
+              <th className="pb-4 pl-4">{t('price_range')}</th>
+              <th className="pb-4">{t('DCF')}</th>
+              <th className="pb-4">{t('yield_signal')}</th>
+              <th className="pb-4">{t('PB')}</th>
+              <th className="pb-4">{t('rating')}</th>
+              <th className="pb-4">{t('strategy_action')}</th>
+            </tr>
+          </thead>
+          <tbody className="text-sm font-bold">
+            {levels.map((lvl) => (
+              <tr key={lvl.id} className={`border-b border-white/5 transition-colors ${lvl.bg}`}>
+                <td className="py-4 pl-4 text-slate-300">${lvl.price}</td>
+                <td className="py-4 text-slate-400">{lvl.dcf}</td>
+                <td className="py-4 text-teal-400">{lvl.yield}</td>
+                <td className="py-4 text-slate-400">{lvl.pb}</td>
+                <td className="py-4 tracking-tighter">{lvl.rating}</td>
+                <td className={`py-4 font-black ${lvl.color}`}>{lvl.label}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8 pt-8 border-t border-white/5">
+        <div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-emerald-500 mb-4">{t('entry_strategy')}</div>
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 text-xs">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span className="text-slate-400">{t('batch_1')}：</span>
+              <span className="text-emerald-400 font-bold">${(pbFair * 0.95).toFixed(1)} {t('below')}</span>
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span className="text-slate-400">{t('batch_2')}：</span>
+              <span className="text-emerald-400 font-bold">${(pbFair * 0.85).toFixed(1)} {t('below')}</span>
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span className="text-slate-400">{t('batch_3')}：</span>
+              <span className="text-rose-400 font-black tracking-widest animate-pulse">${(pbFair * 0.75).toFixed(1)} {t('below')}</span>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-black uppercase tracking-widest text-rose-500 mb-4">{t('exit_strategy')}</div>
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 text-xs">
+              <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+              <span className="text-slate-400">{t('exit_logic')}：</span>
+              <span className="text-rose-400 font-bold">${(pbFair * 1.3).toFixed(1)} ~ ${(pbFair * 1.5).toFixed(1)}</span>
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+              <span className="text-slate-400">{t('overheated')}：</span>
+              <span className="text-rose-600 font-black tracking-widest">${(pbFair * 1.6).toFixed(1)} {t('above')}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </GlassCard>
+  );
+};
+
 // =============================================
 // Error Boundary
 // =============================================
@@ -80,14 +402,16 @@ class ErrorBoundary extends React.Component {
   }
   render() {
     if (this.state.hasError) {
+      const currentLang = localStorage.getItem('stock_vision_lang') || 'zh';
+      const trans = translations[currentLang] || translations.zh;
       return (
         <div className="min-h-screen bg-[#020617] text-white flex items-center justify-center p-8">
           <div className="text-center space-y-6">
             <AlertTriangle size={60} className="mx-auto text-rose-500" />
-            <h2 className="text-3xl font-black">系統渲染錯誤</h2>
-            <p className="text-slate-400 max-w-md mx-auto">{this.state.error?.message || '未知錯誤'}</p>
+            <h2 className="text-3xl font-black">{trans.render_error}</h2>
+            <p className="text-slate-400 max-w-md mx-auto">{this.state.error?.message || trans.unknown_error}</p>
             <button onClick={() => window.location.reload()} className="px-8 py-4 bg-violet-600 rounded-2xl font-black">
-              重新載入
+              {trans.reload}
             </button>
           </div>
         </div>
@@ -116,6 +440,16 @@ const Dashboard = () => {
     const saved = localStorage.getItem('stock_search_history');
     return saved ? JSON.parse(saved) : [];
   });
+  const [lang, setLang] = useState(() => localStorage.getItem('stock_vision_lang') || 'zh');
+
+  // Translation helper
+  const t = useCallback((key) => translations[lang][key] || key, [lang]);
+
+  // Sync lang to localStorage
+  useEffect(() => {
+    localStorage.setItem('stock_vision_lang', lang);
+  }, [lang]);
+
 
   // Sync history to localStorage
   useEffect(() => {
@@ -229,11 +563,11 @@ const Dashboard = () => {
 
     if (stockInfo.currentPrice && valuationData?.fair) {
       if (stockInfo.currentPrice <= valuationData.fair) {
-        valSignal = { type: 'buy', text: '宜買進' };
+        valSignal = { type: 'buy', text: t('buy') };
       } else if (stockInfo.currentPrice > highestPrice1Y && highestPrice1Y !== -Infinity) {
-        valSignal = { type: 'sell', text: '宜賣出' };
+        valSignal = { type: 'sell', text: t('sell') };
       } else {
-        valSignal = { type: 'hold', text: '觀望' };
+        valSignal = { type: 'hold', text: t('hold') };
       }
     }
 
@@ -249,11 +583,11 @@ const Dashboard = () => {
         const prev = computedKline[i - 1];
         
         if (prev.kdK < prev.kdD && curr.kdK > curr.kdD) {
-          kdSignal = { type: 'golden', text: 'KD黃金交叉' };
+          kdSignal = { type: 'golden', text: t('golden') };
           foundCross = true;
           break;
         } else if (prev.kdK > prev.kdD && curr.kdK < curr.kdD) {
-          kdSignal = { type: 'death', text: 'KD死亡交叉' };
+          kdSignal = { type: 'death', text: t('death') };
           foundCross = true;
           break;
         }
@@ -263,17 +597,17 @@ const Dashboard = () => {
         const latest = computedKline[lastIndex];
         const prevLatest = computedKline[lastIndex - 1];
         if (latest.kdK > prevLatest.kdK) {
-          kdSignal = { type: 'up', text: 'KD向上' };
+          kdSignal = { type: 'up', text: t('up') };
         } else if (latest.kdK < prevLatest.kdK) {
-          kdSignal = { type: 'down', text: 'KD向下' };
+          kdSignal = { type: 'down', text: t('down') };
         } else {
-          kdSignal = { type: 'flat', text: 'KD持平' };
+          kdSignal = { type: 'flat', text: t('flat') };
         }
       }
     }
 
     return { valSignal, kdSignal, highestPrice1Y };
-  }, [stockInfo, computedKline, valuationData]);
+  }, [stockInfo, computedKline, valuationData, t]);
 
   // ---- Determine which view to render ----
   let viewKey = 'idle';
@@ -290,12 +624,21 @@ const Dashboard = () => {
           <Badge color={loading ? "emerald" : "violet"}>{version}</Badge>
           <div className="flex items-center gap-2 text-slate-500 text-[10px] font-black uppercase tracking-widest">
             <Globe size={12} className={loading ? "animate-spin" : ""} />
-            {loading ? "正在同步全球市場狀態..." : "實時雲端連線已啟動"}
+            {loading ? t('syncing') : t('connected')}
           </div>
         </div>
-        <button onClick={() => window.location.reload()} className="hover:text-violet-400 transition-colors">
-          <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-        </button>
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+            className="flex items-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-full border border-white/10 text-[10px] font-black uppercase tracking-widest transition-all"
+          >
+            <Globe size={12} />
+            {lang === 'zh' ? 'English' : '繁體中文'}
+          </button>
+          <button onClick={() => window.location.reload()} className="hover:text-violet-400 transition-colors">
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+          </button>
+        </div>
       </div>
 
       {/* Header Section */}
@@ -315,20 +658,20 @@ const Dashboard = () => {
         <form onSubmit={handleSearch} className="relative">
           <input 
             type="text" 
-            placeholder="輸入股票代碼..." 
+            placeholder={t('placeholder')}
             className="w-full h-20 pl-10 pr-24 bg-white/[0.03] border border-white/10 rounded-[30px] font-black text-xl focus:border-violet-500 outline-none transition-all shadow-xl"
             value={symbol}
             onChange={(e) => setSymbol(e.target.value)}
           />
           <button type="submit" className="absolute right-3 top-3 h-14 px-8 bg-violet-600 hover:bg-violet-500 rounded-2xl font-black shadow-lg shadow-violet-600/30 transition-transform active:scale-95">
-            即刻分析
+            {t('analyze')}
           </button>
         </form>
 
         {/* Search History Row */}
         {searchHistory.length > 0 && (
           <div className="lg:col-span-3 flex flex-wrap gap-2 mt-4 px-2">
-            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest self-center mr-2">最近查詢:</span>
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest self-center mr-2">{t('recent')}:</span>
             {searchHistory.map((h) => {
               const sym = typeof h === 'string' ? h : h.symbol;
               const name = typeof h === 'string' ? '' : h.name;
@@ -345,7 +688,7 @@ const Dashboard = () => {
                   {sym}
                 </button>
                 {name && (
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-[#020617] text-slate-300 text-[11px] font-bold rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10 border border-violet-500/30 shadow-xl shadow-violet-900/20">
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-[#020617] text-slate-300 text-[11px] font-bold rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-20 border border-violet-500/30 shadow-xl shadow-violet-900/20">
                     {name}
                   </div>
                 )}
@@ -359,6 +702,7 @@ const Dashboard = () => {
             </button>
           </div>
         )}
+
       </header>
 
       {/* Content Area - Conditional Rendering with keys */}
@@ -370,8 +714,8 @@ const Dashboard = () => {
               <Activity className="absolute inset-0 m-auto text-violet-400 animate-pulse" />
             </div>
             <div className="text-center space-y-2">
-              <p className="text-2xl font-black italic tracking-tighter">上網讀取中...</p>
-              <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">數據分析中，正在執行並行快取機制</p>
+              <p className="text-2xl font-black italic tracking-tighter">{t('loading_title')}</p>
+              <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">{t('loading_sub')}</p>
             </div>
           </motion.div>
         )}
@@ -380,9 +724,9 @@ const Dashboard = () => {
           <motion.div key="error" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <GlassCard className="p-20 text-center border-rose-500/20">
               <AlertTriangle size={60} className="mx-auto text-rose-500 mb-8" />
-              <h2 className="text-3xl font-black mb-4">連線中斷或查無此股</h2>
+              <h2 className="text-3xl font-black mb-4">{t('error_title')}</h2>
               <p className="text-slate-400 max-w-lg mx-auto mb-10 font-bold">{error}</p>
-              <button onClick={handleSearch} className="px-12 py-5 bg-violet-600 rounded-3xl font-black shadow-xl shadow-violet-600/20">嘗試手動修復連線</button>
+              <button onClick={handleSearch} className="px-12 py-5 bg-violet-600 rounded-3xl font-black shadow-xl shadow-violet-600/20">{t('error_retry')}</button>
             </GlassCard>
           </motion.div>
         )}
@@ -393,8 +737,8 @@ const Dashboard = () => {
               <Search size={60} className="text-slate-600" />
             </div>
             <div className="text-center space-y-2">
-              <p className="text-3xl font-black italic tracking-tighter text-slate-500">WAITING FOR INPUT...</p>
-              <p className="text-slate-600 text-xs font-black uppercase tracking-widest">請在上方輸入想查詢的股票代碼</p>
+              <p className="text-3xl font-black italic tracking-tighter text-slate-500 uppercase">{t('idle_title')}</p>
+              <p className="text-slate-600 text-xs font-black uppercase tracking-widest">{t('idle_sub')}</p>
             </div>
           </motion.div>
         )}
@@ -408,7 +752,7 @@ const Dashboard = () => {
                 <div className="space-y-4">
                   <div className="flex items-center gap-3">
                     <span className="px-3 py-1 bg-violet-500/10 text-violet-400 text-[10px] font-black tracking-[0.2em] rounded-full border border-violet-500/20 uppercase">
-                      Target Analysis {stockInfo.isETF && "(ETF)"}
+                      {t('target_analysis')} {stockInfo.isETF && t('etf')}
                     </span>
                   </div>
                   <div className="flex items-center gap-4">
@@ -454,7 +798,7 @@ const Dashboard = () => {
               {stockInfo.realtime && (
                 <div className="flex flex-wrap items-center gap-x-12 gap-y-6 pt-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
                   <div className="flex flex-col">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">成交價 / 漲跌</span>
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{t('price_change')}</span>
                     <div className="flex items-baseline gap-3">
                       <span className="text-5xl font-black tracking-tighter text-white">${stockInfo.currentPrice.toFixed(2)}</span>
                       <div className={`flex items-center gap-1 font-black text-lg ${stockInfo.realtime.change >= 0 ? 'text-rose-500' : 'text-emerald-400'}`}>
@@ -464,7 +808,7 @@ const Dashboard = () => {
                     </div>
                     {/* New: Book Value Per Share (BVPS) */}
                     <div className="flex items-center gap-2 mt-1 opacity-70">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">股票淨值:</span>
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{t('bvps')}:</span>
                       <span className="text-lg font-black text-slate-300">${stockInfo.bvps?.toFixed(2) || '--'}</span>
                     </div>
                   </div>
@@ -473,7 +817,7 @@ const Dashboard = () => {
 
                   <div className="grid grid-cols-2 gap-x-8 gap-y-4">
                     <div className="flex flex-col">
-                      <span className="text-[9px] font-bold text-slate-500 uppercase">今日最高 / 最低</span>
+                      <span className="text-[9px] font-bold text-slate-500 uppercase">{t('day_range')}</span>
                       <div className="flex items-baseline gap-2">
                         <span className="text-lg font-black text-rose-500">${stockInfo.realtime.dayHigh.toFixed(2)}</span>
                         <span className="text-sm font-bold text-slate-600">/</span>
@@ -481,7 +825,7 @@ const Dashboard = () => {
                       </div>
                     </div>
                     <div className="flex flex-col">
-                      <span className="text-[9px] font-bold text-slate-500 uppercase">當月最高 / 最低</span>
+                      <span className="text-[9px] font-bold text-slate-500 uppercase">{t('month_range')}</span>
                       <div className="flex items-baseline gap-2">
                         <span className="text-lg font-black text-rose-400/80">${stockInfo.monthStats?.high?.toFixed(2) || '--'}</span>
                         <span className="text-sm font-bold text-slate-600">/</span>
@@ -493,10 +837,10 @@ const Dashboard = () => {
                   <div className="h-10 w-[1px] bg-white/10 hidden md:block" />
 
                   <div className="flex flex-col">
-                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">今日成交量</span>
+                    <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">{t('volume')}</span>
                     <span className="text-lg font-black text-violet-400">
                       {stockInfo.realtime.volume?.toLocaleString()} 
-                      <span className="ml-1 text-[10px] opacity-60">股</span>
+                      <span className="ml-1 text-[10px] opacity-60">{t('unit_share')}</span>
                     </span>
                   </div>
 
@@ -533,14 +877,14 @@ const Dashboard = () => {
                       <div className="p-3 bg-white/[0.05] rounded-[20px]">
                         <Activity className="text-blue-400" size={20} />
                       </div>
-                      <h3 className="text-xl font-black tracking-tight italic">Today's Intraday Trend (1m)</h3>
+                      <h3 className="text-xl font-black tracking-tight italic">{t('intraday')}</h3>
                     </div>
                     <div className="text-[10px] font-black text-slate-500 uppercase flex gap-6">
-                      <span>今日開盤: <span className="text-white">{openPrice > 0 ? `$${openPrice.toFixed(2)}` : '--'}</span></span>
+                      <span>{t('open')}: <span className="text-white">{openPrice > 0 ? `$${openPrice.toFixed(2)}` : '--'}</span></span>
                       {hasData && (
                         <>
-                          <span>均價(VWAP): <span className="text-amber-400">${intradayData[intradayData.length - 1].avg.toFixed(2)}</span></span>
-                          <span>算術均價: <span className="text-slate-400">${intradayData[intradayData.length - 1].simpleAvg.toFixed(2)}</span></span>
+                          <span>{t('vwap')}: <span className="text-amber-400">${intradayData[intradayData.length - 1].avg.toFixed(2)}</span></span>
+                          <span>{t('simple_avg')}: <span className="text-slate-400">${intradayData[intradayData.length - 1].simpleAvg.toFixed(2)}</span></span>
                         </>
                       )}
                     </div>
@@ -550,7 +894,7 @@ const Dashboard = () => {
                     {!hasData ? (
                       <div className="flex flex-col items-center gap-3 text-slate-500 animate-pulse">
                         <AlertTriangle size={48} className="opacity-20" />
-                        <span className="text-sm font-bold tracking-widest uppercase opacity-40">Today No Trading Data Available</span>
+                        <span className="text-sm font-bold tracking-widest uppercase opacity-40">{t('no_data')}</span>
                       </div>
                     ) : (
                       <ResponsiveContainer width="100%" height="100%">
@@ -592,7 +936,7 @@ const Dashboard = () => {
                           y={prevClose} 
                           stroke="#64748b" 
                           strokeDasharray="5 5" 
-                          label={{ value: `昨收 ${prevClose.toFixed(2)}`, position: 'insideLeft', fill: '#64748b', fontSize: 10, fontWeight: 'bold' }} 
+                          label={{ value: `${t('last_close')} ${prevClose.toFixed(2)}`, position: 'insideLeft', fill: '#64748b', fontSize: 10, fontWeight: 'bold' }} 
                         />
                         <ReferenceLine 
                           y={openPrice} 
@@ -608,25 +952,25 @@ const Dashboard = () => {
                               const isUp = val >= openPrice;
                               return [
                                 <span style={{ color: isUp ? '#f43f5e' : '#10b981' }}>${val.toFixed(2)}</span>,
-                                '成交價'
+                                t('price_change').split('/')[0]
                               ];
                             }
                             if (name === 'avg') {
                               return [
                                 <span className="text-amber-400">${val.toFixed(2)}</span>,
-                                '平均成本(VWAP)'
+                                t('vwap')
                               ];
                             }
                             if (name === 'simpleAvg') {
                               return [
                                 <span className="text-slate-400">${val.toFixed(2)}</span>,
-                                '交易均價'
+                                t('simple_avg')
                               ];
                             }
                             if (name === 'volume') {
                               return [
-                                <span className="text-slate-300">{val.toLocaleString()} <small className="opacity-50">股</small></span>,
-                                '成交量'
+                                <span className="text-slate-300">{val.toLocaleString()} <small className="opacity-50">{t('unit_share')}</small></span>,
+                                t('volume')
                               ];
                             }
                             return [val, name];
@@ -674,6 +1018,15 @@ const Dashboard = () => {
             );
           })()}
 
+          {/* Strategic Analysis Table */}
+          {stockInfo?.valuation && (
+            <StrategyTable 
+              stockInfo={stockInfo} 
+              valuation={stockInfo.valuation} 
+              t={t} 
+            />
+          )}
+
 
 
             {/* Annual Stats Table */}
@@ -683,18 +1036,18 @@ const Dashboard = () => {
                   <div className="p-2 bg-white/[0.05] rounded-xl">
                     <Calculator size={18} className="text-rose-400" />
                   </div>
-                  <h3 className="text-xl font-black italic tracking-tighter text-slate-300">年度統計與合理價 (5-Year Stats)</h3>
+                  <h3 className="text-xl font-black italic tracking-tighter text-slate-300">{t('stats_title')}</h3>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse min-w-[600px]">
                     <thead>
                       <tr className="border-b border-white/10 text-slate-500 text-[10px] uppercase tracking-widest font-black">
-                        <th className="pb-4 pl-4">Year</th>
-                        <th className="pb-4">High</th>
-                        <th className="pb-4">Low</th>
-                        <th className="pb-4">Total EPS</th>
-                        <th className="pb-4">Book Value</th>
-                        <th className="pb-4">Fair Price (Est)</th>
+                        <th className="pb-4 pl-4">{t('year')}</th>
+                        <th className="pb-4">{t('high')}</th>
+                        <th className="pb-4">{t('low')}</th>
+                        <th className="pb-4">{t('total_eps')}</th>
+                        <th className="pb-4">{t('book_value')}</th>
+                        <th className="pb-4">{t('fair_price')}</th>
                       </tr>
                     </thead>
                     <tbody className="text-sm font-bold">
@@ -726,7 +1079,7 @@ const Dashboard = () => {
                   <div className="p-2 bg-white/[0.05] rounded-xl">
                     <Activity size={18} className="text-teal-400" />
                   </div>
-                  <h3 className="text-xl font-black italic tracking-tighter text-slate-300">長期 EPS 成長追蹤</h3>
+                  <h3 className="text-xl font-black italic tracking-tighter text-slate-300">{t('eps_track')}</h3>
                 </div>
                 <div className="w-full h-[200px]">
                   <ResponsiveContainer width="100%" height="100%">
@@ -742,8 +1095,8 @@ const Dashboard = () => {
                           if (name === '單季EPS') {
                             return [
                               <div className="flex flex-col gap-1">
-                                <span className="text-teal-400">當季 EPS: {value?.toFixed(2)}</span>
-                                <span className="text-slate-500 text-[10px] font-medium italic">年度累計: {props.payload.yearlyEps?.toFixed(2)}</span>
+                                <span className="text-teal-400">{t('quarter_eps')}: {value?.toFixed(2)}</span>
+                                <span className="text-slate-500 text-[10px] font-medium italic">{t('accumulated_eps')}: {props.payload.yearlyEps?.toFixed(2)}</span>
                               </div>,
                               ''
                             ];
@@ -770,7 +1123,7 @@ const Dashboard = () => {
                     <div className="p-3 bg-white/[0.05] rounded-[20px]">
                       <Activity className="text-emerald-400" size={20} />
                     </div>
-                    <h3 className="text-xl font-black tracking-tight italic">{mode} {mode === 'DCF' ? 'Intrinsic Value' : '12-Quarter Trend River'}</h3>
+                    <h3 className="text-xl font-black tracking-tight italic">{mode === 'DCF' ? t('intrinsic_value') : `${t(mode)} ${t('river_title')}`}</h3>
                   </div>
                   <div className="flex gap-2 bg-white/[0.03] p-1.5 rounded-2xl border border-white/5">
                     {['PE', 'PB', 'DCF'].map(m => (
@@ -779,7 +1132,7 @@ const Dashboard = () => {
                         onClick={() => setMode(m)}
                         className={`px-6 py-2.5 rounded-xl font-black text-xs transition-all ${mode === m ? 'bg-violet-600 shadow-lg shadow-violet-600/30' : 'text-slate-500 hover:text-white'}`}
                       >
-                        {m} 模型
+                        {t(m)}
                       </button>
                     ))}
                   </div>
@@ -797,7 +1150,7 @@ const Dashboard = () => {
                         width={30} 
                         tickLine={false} 
                         axisLine={false} 
-                        label={{ value: mode === 'DCF' ? 'Value ($)' : mode, angle: -90, position: 'insideLeft', fill: '#8b5cf6', fontSize: 10, fontWeight: 'bold' }}
+                        label={{ value: mode === 'DCF' ? `${t('fair_price')} ($)` : mode, angle: -90, position: 'insideLeft', fill: '#8b5cf6', fontSize: 10, fontWeight: 'bold' }}
                       />
                       
                       {/* Right Axis for Price ($) */}
@@ -809,16 +1162,16 @@ const Dashboard = () => {
                         width={45} 
                         tickLine={false} 
                         axisLine={false} 
-                        label={{ value: 'Price ($)', angle: 90, position: 'insideRight', fill: '#ffffff', fontSize: 10, fontWeight: 'bold' }}
+                        label={{ value: `${t('price_change').split('/')[0]} ($)`, angle: 90, position: 'insideRight', fill: '#ffffff', fontSize: 10, fontWeight: 'bold' }}
                       />
 
                       <Tooltip 
                         contentStyle={{ backgroundColor: '#020617', border: '1px solid #ffffff10', borderRadius: '20px' }}
                         itemStyle={{ fontSize: '12px', padding: 0 }}
                         formatter={(val, name) => {
-                          if (name === 'price') return [`$${val.toFixed(2)}`, '股價'];
-                          if (name === 'pe') return [`${val.toFixed(2)}x`, '當前本益比(PE)'];
-                          if (name === 'pb') return [`${val.toFixed(2)}x`, '當前股價淨值比(PB)'];
+                          if (name === 'price') return [`$${val.toFixed(2)}`, t('price_change').split('/')[0].trim()];
+                          if (name === 'pe') return [`${val.toFixed(2)}x`, `${t('PE')} (PE)`];
+                          if (name === 'pb') return [`${val.toFixed(2)}x`, `${t('PB')} (PB)`];
                           return [val, name];
                         }}
                       />
@@ -858,7 +1211,7 @@ const Dashboard = () => {
                             fill="url(#colorDcf)" 
                             radius={[6, 6, 0, 0]}
                             barSize={40}
-                            name="DCF 合理價值"
+                            name={t('DCF') + " Fair Value"}
                           />
                           {/* Reference bands as subtle dotted lines */}
                           <Line yAxisId="price" type="monotone" dataKey="dcfExpensive" stroke="#f43f5e" strokeDasharray="3 3" strokeOpacity={0.4} dot={false} />
@@ -870,7 +1223,7 @@ const Dashboard = () => {
                             stroke="#ffffff" 
                             strokeWidth={3} 
                             dot={{ r: 5, fill: '#ffffff', strokeWidth: 2 }} 
-                            name="目前價格"
+                            name={t('price_change').split('/')[0].trim()}
                           />
                         </>
                       )}

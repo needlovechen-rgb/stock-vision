@@ -386,16 +386,25 @@ export async function fetchStockData(symbol) {
       }
 
       if (!yearlyStatsMap[year]) {
-        yearlyStatsMap[year] = { year, high: d.high, low: d.low, close: d.close, count: 0 };
+        yearlyStatsMap[year] = { 
+          year, 
+          high: d.high > 0 ? d.high : d.close, 
+          low: d.low > 0 ? d.low : d.close, 
+          close: d.close, 
+          count: 0 
+        };
       }
-      yearlyStatsMap[year].high = Math.max(yearlyStatsMap[year].high, d.high);
-      yearlyStatsMap[year].low = Math.min(yearlyStatsMap[year].low, d.low);
+      if (d.high > 0) yearlyStatsMap[year].high = Math.max(yearlyStatsMap[year].high, d.high);
+      if (d.low > 0) yearlyStatsMap[year].low = Math.min(yearlyStatsMap[year].low, d.low);
       yearlyStatsMap[year].close = d.close;
     });
 
+    const validMonthLows = monthData.filter(m => m.low > 0).map(m => m.low);
+    const validMonthHighs = monthData.filter(m => m.high > 0).map(m => m.high);
+
     const monthStats = {
-      high: monthData.length > 0 ? Math.max(...monthData.map(m => m.high)) : currentPrice,
-      low: monthData.length > 0 ? Math.min(...monthData.map(m => m.low)) : currentPrice
+      high: validMonthHighs.length > 0 ? Math.max(...validMonthHighs) : currentPrice,
+      low: validMonthLows.length > 0 ? Math.min(...validMonthLows) : currentPrice
     };
 
     const yearlyStats = Object.values(yearlyStatsMap).sort((a, b) => b.year - a.year);
