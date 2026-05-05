@@ -72,10 +72,47 @@ async function fetchWithRetry(url, options = {}, retries = RETRY_LIMIT) {
   throw new Error('所有數據源連線失敗');
 }
 
+async function fetchWithCache(url, cacheKey, durationMs = 604800000) { // Default 7 days
+  const isBrowser = typeof window !== 'undefined' && window.localStorage;
+  if (isBrowser) {
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Date.now() - parsed.timestamp < durationMs) {
+          console.log(`[Cache Hit] ${cacheKey}`);
+          return parsed.data;
+        }
+      }
+    } catch (e) {} // Ignore parse errors
+  }
+
+  const data = await fetchWithRetry(url).catch(() => null);
+
+  if (isBrowser && data && data.data && data.data.length > 0) {
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify({
+        timestamp: Date.now(),
+        data: data
+      }));
+    } catch (e) {} // Ignore quota errors
+  }
+  return data;
+}
+
 const to2 = (val) => typeof val === 'number' ? Number(val.toFixed(2)) : null;
 
 // Technical Indicators Calculation
-const calculateMA = (data, p) => data.map((_, i) => i < p-1 ? null : data.slice(i-p+1, i+1).reduce((a, b) => a + (b||0), 0) / p);
+const calculateMA = (data, p) => {
+  const result = new Array(data.length).fill(null);
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) {
+    sum += (data[i] || 0);
+    if (i >= p) sum -= (data[i - p] || 0);
+    if (i >= p - 1) result[i] = sum / p;
+  }
+  return result;
+};
 export const calculateEMA = (data, p) => {
   const k = 2 / (p + 1);
   let ema = [], curr = null;
@@ -158,13 +195,13 @@ export async function fetchStockData(symbol) {
       // 2. FinMind Historical Price (Primary for K-Line)
       stockId ? fetchWithRetry(`/finmind-api/api/v4/data?dataset=TaiwanStockPrice&data_id=${stockId}&start_date=${priceStartDate}`).catch(() => null) : Promise.resolve(null),
       // 3. FinMind Financial Statements (EPS, Income)
-      stockId ? fetchWithRetry(`/finmind-api/api/v4/data?dataset=TaiwanStockFinancialStatements&data_id=${stockId}&start_date=${financialStartDate}`).catch(() => null) : Promise.resolve(null),
+      stockId ? fetchWithCache(`/finmind-api/api/v4/data?dataset=TaiwanStockFinancialStatements&data_id=${stockId}&start_date=${financialStartDate}`, `fm_eps_${stockId}_${financialStartDate}`) : Promise.resolve(null),
       // 4. FinMind Stock Info (Primary for Name)
-      stockId ? fetchWithRetry(`/finmind-api/api/v4/data?dataset=TaiwanStockInfo&data_id=${stockId}`).catch(() => null) : Promise.resolve(null),
+      (stockId && !STOCK_NAME_MAP[yahooSymbol]) ? fetchWithRetry(`/finmind-api/api/v4/data?dataset=TaiwanStockInfo&data_id=${stockId}`).catch(() => null) : Promise.resolve(null),
       // 5. Yahoo Real-time Chart (Most reliable for current price)
       fetchWithRetry(`/yahoo-api/v8/finance/chart/${yahooSymbol}?interval=1m&range=1d`).catch(() => ({})),
       // 6. FinMind Balance Sheet (For exact Book Value Per Share calculation: Equity / Shares)
-      stockId ? fetchWithRetry(`/finmind-api/api/v4/data?dataset=TaiwanStockBalanceSheet&data_id=${stockId}&start_date=${financialStartDate}`).catch(() => null) : Promise.resolve(null)
+      stockId ? fetchWithCache(`/finmind-api/api/v4/data?dataset=TaiwanStockBalanceSheet&data_id=${stockId}&start_date=${financialStartDate}`, `fm_bs_${stockId}_${financialStartDate}`) : Promise.resolve(null)
     ];
 
     const [yahooSummary, fmPrice, fmFinancials, fmInfo, yahooRTChart, fmBalanceSheet] = await Promise.all(requests);
@@ -233,24 +270,28 @@ export async function fetchStockData(symbol) {
         const q = Math.ceil(month / 3);
         const key = `${year}-Q${q}`;
 
-        if (!bsMap[key]) bsMap[key] = { equity: null, shareCapital: null };
+        if (!bsMap[key]) bsMap[key] = { equity: null, shareCapital: null, assets: null, liabilities: null };
 
         // Match common Taiwanese accounting types for Total Equity (股東權益)
-        // Prioritize EquityAttributableToOwnersOfParent for exact BVPS
-        if (item.type === 'EquityAttributableToOwnersOfParent') {
+        const type = item.type.toLowerCase();
+        if (type === 'equityattributabletoownersofparent' || type === 'equity_attributable_to_owners_of_parent') {
           bsMap[key].equity = item.value;
-        } else if (item.type === 'TotalEquity' && bsMap[key].equity === null) {
+        } else if ((type === 'totalequity' || type === 'total_equity' || type === 'equity') && bsMap[key].equity === null) {
           bsMap[key].equity = item.value;
+        } else if (type === 'totalassets' || type === 'total_assets') {
+          bsMap[key].assets = item.value;
+        } else if (type === 'totalliabilities' || type === 'total_liabilities') {
+          bsMap[key].liabilities = item.value;
         }
         // Match common Taiwanese accounting types for Share Capital (普通股股本)
-        else if (item.type === 'OrdinaryShare') {
+        else if (type === 'ordinaryshare' || type === 'ordinary_share' || type === 'common_stocks' || type === 'common_stock') {
           bsMap[key].shareCapital = item.value;
-        } else if (item.type === 'ShareCapital' && bsMap[key].shareCapital === null) {
+        } else if ((type === 'sharecapital' || type === 'share_capital') && bsMap[key].shareCapital === null) {
           bsMap[key].shareCapital = item.value;
         }
         
         // Safety bypass if FinMind explicitly outputs the final NAV ratio
-        if (item.type === 'NAV' || item.type.includes('每股淨值')) {
+        if (type === 'nav' || type.includes('每股淨值') || type.includes('net_asset_value')) {
           bvpsMap[year] = item.value;
           latestBVPSFromFM = item.value;
         }
@@ -260,10 +301,14 @@ export async function fetchStockData(symbol) {
       Object.keys(bsMap).sort().forEach(key => {
         const year = key.split('-')[0];
         const d = bsMap[key];
+        
+        // Try to derive equity if missing (Assets - Liabilities)
+        const effectiveEquity = d.equity || (d.assets && d.liabilities ? (d.assets - d.liabilities) : null);
+        
         // Taiwanese Par Value is usually 10 TWD per share -> shares_outstanding = share_capital ÷ 10
-        if (d.equity && d.shareCapital && d.shareCapital !== 0) {
+        if (effectiveEquity && d.shareCapital && d.shareCapital !== 0) {
            const sharesOutstanding = d.shareCapital / 10;
-           const exactBVPS = d.equity / sharesOutstanding;
+           const exactBVPS = effectiveEquity / sharesOutstanding;
            bvpsMap[year] = exactBVPS;
            latestBVPSFromFM = exactBVPS;
         }
@@ -514,6 +559,12 @@ export async function fetchStockData(symbol) {
           isUp: p >= openPrice
         };
       }).filter(d => d !== null);
+    }
+
+    // Final check to ensure accurate change & changePercent if we have valid currentPrice and prevClose
+    if (currentPrice > 0 && rt.prevClose > 0) {
+      rt.change = to2(currentPrice - rt.prevClose);
+      rt.changePercent = to2((rt.change / rt.prevClose) * 100);
     }
 
     const result = {

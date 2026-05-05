@@ -872,12 +872,16 @@ const Dashboard = () => {
 
               return (
                 <GlassCard className="p-8 flex flex-col border-t-[6px] border-t-blue-500/30 bg-blue-500/[0.01]">
-                  <div className="flex items-center justify-between mb-8">
-                    <div className="flex items-center gap-3">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-8">
+                    <div className="flex flex-wrap items-center gap-3">
                       <div className="p-3 bg-white/[0.05] rounded-[20px]">
                         <Activity className="text-blue-400" size={20} />
                       </div>
                       <h3 className="text-xl font-black tracking-tight italic">{t('intraday')}</h3>
+                      <div className="bg-amber-500/10 text-amber-500/70 border border-amber-500/20 px-2 py-0.5 rounded text-[9px] font-black tracking-wider uppercase ml-2 flex items-center gap-1">
+                        <AlertTriangle size={10} />
+                        Yahoo API 延遲 20 分鐘
+                      </div>
                     </div>
                     <div className="text-[10px] font-black text-slate-500 uppercase flex gap-6">
                       <span>{t('open')}: <span className="text-white">{openPrice > 0 ? `$${openPrice.toFixed(2)}` : '--'}</span></span>
@@ -1118,14 +1122,14 @@ const Dashboard = () => {
             {/* River Section - Only show if not ETF and has valuation data */}
             {valuationData ? (
               <GlassCard className="p-8 flex flex-col border-t-[6px] border-t-emerald-500/30">
-                <div className="flex items-center justify-between mb-10">
-                  <div className="flex items-center gap-3">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-10">
+                  <div className="flex flex-wrap items-center gap-3">
                     <div className="p-3 bg-white/[0.05] rounded-[20px]">
                       <Activity className="text-emerald-400" size={20} />
                     </div>
                     <h3 className="text-xl font-black tracking-tight italic">{mode === 'DCF' ? t('intrinsic_value') : `${t(mode)} ${t('river_title')}`}</h3>
                   </div>
-                  <div className="flex gap-2 bg-white/[0.03] p-1.5 rounded-2xl border border-white/5">
+                  <div className="flex flex-wrap gap-2 bg-white/[0.03] p-1.5 rounded-2xl border border-white/5">
                     {['PE', 'PB', 'DCF'].map(m => (
                       <button 
                         key={m} 
@@ -1255,8 +1259,8 @@ const Dashboard = () => {
 
             {/* K-Line Section */}
             <GlassCard className="p-8 flex flex-col border-t-[6px] border-t-violet-600/30">
-              <div className="flex items-center justify-between mb-10">
-                <div className="flex items-center gap-3">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-10">
+                <div className="flex flex-wrap items-center gap-3">
                   <div className="p-3 bg-white/[0.05] rounded-[20px]">
                     <LineChartIcon className="text-violet-400" size={20} />
                   </div>
