@@ -230,30 +230,67 @@ const IndicatorRow = ({ label, val, current, color }) => {
 const StrategyTable = ({ stockInfo, valuation, t }) => {
   if (!stockInfo || !valuation) return null;
 
-  // 統一錨定點：優先使用 PE 合理價 (最符合市場共識)，次之 DCF，最後 PB
-  const peFair = valuation.pe?.fair;
-  const pbFair = valuation.pb?.fair;
-  const dcfFair = valuation.dcf?.fair;
+  const peFair  = valuation.pe?.fair  || 0;
+  const pbFair  = valuation.pb?.fair  || 0;
+  const dcfFair = valuation.dcf?.fair || 0;
   const currentPrice = stockInfo.currentPrice;
-  
-  // 核心合理價錨點
-  const fairAnchor = peFair || dcfFair || pbFair || currentPrice;
 
-  // 估計股利 (優先使用 Yahoo 數據，若無則依據最近 3 年平均 EPS 的 70% 推估)
-  const yahooDiv = stockInfo.summary?.summaryDetail?.dividendRate?.raw || 
-                  stockInfo.summary?.summaryDetail?.trailingAnnualDividendRate?.raw || 0;
-  const avgEps3Y = (stockInfo.yearlyStats?.slice(0, 3).reduce((acc, y) => acc + (y.totalEps || 0), 0) / 
+  // ── 三合一合理價：改採「中位數」法，排除極端偏離的模型，確保錨點穩健 ──
+  const validFairs = [peFair, pbFair, dcfFair].filter(v => v > 0).sort((a, b) => a - b);
+  let fairAnchor = currentPrice;
+  if (validFairs.length === 3) {
+    fairAnchor = validFairs[1]; // 取中位數
+  } else if (validFairs.length > 0) {
+    fairAnchor = validFairs.reduce((a, b) => a + b, 0) / validFairs.length; // 僅 1~2 個有效時取平均
+  }
+
+  // ── PB 區間：依實際 avg / min / max 動態計算，避免硬編碼 ──
+  const pbAvg = valuation.pb?.avg || 1.0;
+  const pbMin = valuation.pb?.min || pbAvg * 0.7;
+  const pbMax = valuation.pb?.max || pbAvg * 1.3;
+  // 每個價格區間對應的 PB 值 = 區間中間價 ÷ BVPS
+  const bvps = (pbFair > 0 && pbAvg > 0) ? (pbFair / pbAvg) : 0;
+  const calcPB = (price) => (bvps > 0 ? price / bvps : null);
+  const fmtPB  = (lo, hi) => {
+    if (!bvps) return '--';
+    return `${calcPB(lo).toFixed(2)}~${calcPB(hi).toFixed(2)}`;
+  };
+  const fmtPBAbove = (price) => (!bvps ? '--' : `>${calcPB(price).toFixed(2)}`);
+  const fmtPBBelow = (price) => (!bvps ? '--' : `<${calcPB(price).toFixed(2)}`);
+
+  // ── DCF 信號：顯示各區間中間價相對 DCF 合理價的偏離度 ──
+  const dcfSignal = (midPrice) => {
+    if (!dcfFair || dcfFair <= 0) return '--';
+    const diff = ((midPrice - dcfFair) / dcfFair) * 100;
+    if (diff > 20)  return `DCF +${diff.toFixed(0)}% 高估`;
+    if (diff > 5)   return `DCF +${diff.toFixed(0)}%`;
+    if (diff > -5)  return `DCF ≈ 合理`;
+    if (diff > -20) return `DCF ${diff.toFixed(0)}%`;
+    return `DCF ${diff.toFixed(0)}% 低估`;
+  };
+
+  // ── 估計股利 ──
+  const yahooDiv = stockInfo.summary?.summaryDetail?.dividendRate?.raw ||
+                   stockInfo.summary?.summaryDetail?.trailingAnnualDividendRate?.raw || 0;
+  const avgEps3Y = (stockInfo.yearlyStats?.slice(0, 3).reduce((acc, y) => acc + (y.totalEps || 0), 0) /
                    Math.max(stockInfo.yearlyStats?.slice(0, 3).length, 1)) || 0;
   const estDividend = Math.max(yahooDiv || (avgEps3Y * 0.7) || 0, 0);
+
+  // ── 各區間定義（以 fairAnchor 為軸心） ──
+  const z5lo = fairAnchor * 1.25;                      // 避開風險：> 125%
+  const z4lo = fairAnchor * 1.10; const z4hi = z5lo;  // 保守減碼：110%~125%
+  const z3lo = fairAnchor * 0.95; const z3hi = z4lo;  // 中性持有：95%~110%
+  const z2lo = fairAnchor * 0.80; const z2hi = z3lo;  // 分批買進：80%~95%
+  const z1hi = z2lo;                                   // 強烈買進：< 80%
 
   const levels = [
     {
       id: 5,
       label: t('avoid'),
-      price: `>${(fairAnchor * 1.25).toFixed(1)}`,
-      dcf: t('conservative'),
-      yield: (estDividend / (fairAnchor * 1.25) * 100).toFixed(1) + '%',
-      pb: (valuation.pb?.fair ? (fairAnchor * 1.25 / (valuation.pb.fair / (valuation.pb.avg || 1))).toFixed(1) : '>1.5'),
+      price: `>${z5lo.toFixed(1)}`,
+      dcf: dcfSignal(z5lo * 1.05),
+      yield: (estDividend > 0 ? (estDividend / z5lo * 100).toFixed(1) + '%' : '--'),
+      pb: fmtPBAbove(z5lo),
       rating: '⭐',
       color: 'text-slate-500',
       bg: 'hover:bg-slate-500/10'
@@ -261,10 +298,10 @@ const StrategyTable = ({ stockInfo, valuation, t }) => {
     {
       id: 4,
       label: t('conservative'),
-      price: `${(fairAnchor * 1.1).toFixed(1)}~${(fairAnchor * 1.25).toFixed(1)}`,
-      dcf: t('hold_signal'),
-      yield: (estDividend / (fairAnchor * 1.15) * 100).toFixed(1) + '%',
-      pb: '1.2~1.5',
+      price: `${z4lo.toFixed(1)}~${z4hi.toFixed(1)}`,
+      dcf: dcfSignal((z4lo + z4hi) / 2),
+      yield: (estDividend > 0 ? (estDividend / ((z4lo + z4hi) / 2) * 100).toFixed(1) + '%' : '--'),
+      pb: fmtPB(z4lo, z4hi),
       rating: '⭐⭐',
       color: 'text-amber-400',
       bg: 'hover:bg-amber-400/10'
@@ -272,10 +309,10 @@ const StrategyTable = ({ stockInfo, valuation, t }) => {
     {
       id: 3,
       label: t('hold_signal'),
-      price: `${(fairAnchor * 0.95).toFixed(1)}~${(fairAnchor * 1.1).toFixed(1)}`,
-      dcf: t('fair_price'),
-      yield: (estDividend / fairAnchor * 100).toFixed(1) + '%',
-      pb: '1.0~1.2',
+      price: `${z3lo.toFixed(1)}~${z3hi.toFixed(1)}`,
+      dcf: dcfSignal(fairAnchor),
+      yield: (estDividend > 0 ? (estDividend / fairAnchor * 100).toFixed(1) + '%' : '--'),
+      pb: fmtPB(z3lo, z3hi),
       rating: '⭐⭐⭐',
       color: 'text-emerald-400',
       bg: 'hover:bg-emerald-400/10'
@@ -283,10 +320,10 @@ const StrategyTable = ({ stockInfo, valuation, t }) => {
     {
       id: 2,
       label: t('buy_signal'),
-      price: `${(fairAnchor * 0.85).toFixed(1)}~${(fairAnchor * 0.95).toFixed(1)}`,
-      dcf: t('buy_signal'),
-      yield: (estDividend / (fairAnchor * 0.9) * 100).toFixed(1) + '%',
-      pb: '0.8~1.0',
+      price: `${z2lo.toFixed(1)}~${z2hi.toFixed(1)}`,
+      dcf: dcfSignal((z2lo + z2hi) / 2),
+      yield: (estDividend > 0 ? (estDividend / ((z2lo + z2hi) / 2) * 100).toFixed(1) + '%' : '--'),
+      pb: fmtPB(z2lo, z2hi),
       rating: '⭐⭐⭐⭐',
       color: 'text-blue-400',
       bg: 'hover:bg-blue-400/10'
@@ -294,10 +331,10 @@ const StrategyTable = ({ stockInfo, valuation, t }) => {
     {
       id: 1,
       label: t('strong_buy'),
-      price: `<${(fairAnchor * 0.85).toFixed(1)}`,
-      dcf: t('strong_buy'),
-      yield: `>${(estDividend / (fairAnchor * 0.85) * 100).toFixed(1)}%`,
-      pb: '<0.8',
+      price: `<${z1hi.toFixed(1)}`,
+      dcf: dcfSignal(z1hi * 0.9),
+      yield: (estDividend > 0 ? `>${(estDividend / z1hi * 100).toFixed(1)}%` : '--'),
+      pb: fmtPBBelow(z1hi),
       rating: '⭐⭐⭐⭐⭐',
       color: 'text-rose-400',
       bg: 'hover:bg-rose-400/10'
@@ -320,7 +357,49 @@ const StrategyTable = ({ stockInfo, valuation, t }) => {
           </div>
         )}
       </div>
-      
+      {/* ── 三合一合理價摘要 ── */}
+      <div className="flex flex-wrap items-center gap-3 mb-6 pb-6 border-b border-white/5">
+        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">合理價錨點</span>
+        {peFair > 0 && (
+          <div className="flex items-center gap-1.5 px-3 py-1 bg-violet-500/10 border border-violet-500/20 rounded-lg">
+            <span className="text-[10px] font-black text-violet-400 uppercase">PE</span>
+            <span className="text-xs font-bold text-violet-300">${peFair.toFixed(2)}</span>
+          </div>
+        )}
+        {pbFair > 0 && (
+          <div className="flex items-center gap-1.5 px-3 py-1 bg-sky-500/10 border border-sky-500/20 rounded-lg">
+            <span className="text-[10px] font-black text-sky-400 uppercase">PB</span>
+            <span className="text-xs font-bold text-sky-300">${pbFair.toFixed(2)}</span>
+          </div>
+        )}
+        {dcfFair > 0 && (
+          <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+            <span className="text-[10px] font-black text-emerald-400 uppercase">DCF</span>
+            <span className="text-xs font-bold text-emerald-300">${dcfFair.toFixed(2)}</span>
+          </div>
+        )}
+        <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+          <span className="text-[10px] font-black text-amber-400 uppercase">⌀ 均值</span>
+          <span className="text-xs font-bold text-amber-300">${fairAnchor.toFixed(2)}</span>
+        </div>
+        {currentPrice > 0 && (
+          <div className={`flex items-center gap-1.5 px-3 py-1 rounded-lg border ${
+            currentPrice <= fairAnchor * 0.95 ? 'bg-emerald-500/10 border-emerald-500/20' :
+            currentPrice >= fairAnchor * 1.10 ? 'bg-rose-500/10 border-rose-500/20' :
+            'bg-slate-500/10 border-slate-500/20'
+          }`}>
+            <span className={`text-[10px] font-black uppercase ${
+              currentPrice <= fairAnchor * 0.95 ? 'text-emerald-400' :
+              currentPrice >= fairAnchor * 1.10 ? 'text-rose-400' : 'text-slate-400'
+            }`}>現價</span>
+            <span className={`text-xs font-bold ${
+              currentPrice <= fairAnchor * 0.95 ? 'text-emerald-300' :
+              currentPrice >= fairAnchor * 1.10 ? 'text-rose-300' : 'text-slate-300'
+            }`}>${currentPrice.toFixed(2)}</span>
+          </div>
+        )}
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse min-w-[700px]">
           <thead>
@@ -355,17 +434,17 @@ const StrategyTable = ({ stockInfo, valuation, t }) => {
             <div className="flex items-center gap-3 text-xs">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               <span className="text-slate-400">{t('batch_1')}：</span>
-              <span className="text-emerald-400 font-bold">${(pbFair * 0.95).toFixed(1)} {t('below')}</span>
+              <span className="text-emerald-400 font-bold">${(fairAnchor * 0.95).toFixed(1)} {t('below')}</span>
             </div>
             <div className="flex items-center gap-3 text-xs">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               <span className="text-slate-400">{t('batch_2')}：</span>
-              <span className="text-emerald-400 font-bold">${(pbFair * 0.85).toFixed(1)} {t('below')}</span>
+              <span className="text-emerald-400 font-bold">${(fairAnchor * 0.85).toFixed(1)} {t('below')}</span>
             </div>
             <div className="flex items-center gap-3 text-xs">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               <span className="text-slate-400">{t('batch_3')}：</span>
-              <span className="text-rose-400 font-black tracking-widest animate-pulse">${(pbFair * 0.75).toFixed(1)} {t('below')}</span>
+              <span className="text-rose-400 font-black tracking-widest animate-pulse">${(fairAnchor * 0.75).toFixed(1)} {t('below')}</span>
             </div>
           </div>
         </div>
@@ -375,12 +454,12 @@ const StrategyTable = ({ stockInfo, valuation, t }) => {
             <div className="flex items-center gap-3 text-xs">
               <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
               <span className="text-slate-400">{t('exit_logic')}：</span>
-              <span className="text-rose-400 font-bold">${(pbFair * 1.3).toFixed(1)} ~ ${(pbFair * 1.5).toFixed(1)}</span>
+              <span className="text-rose-400 font-bold">${(fairAnchor * 1.10).toFixed(1)} ~ ${(fairAnchor * 1.25).toFixed(1)}</span>
             </div>
             <div className="flex items-center gap-3 text-xs">
               <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
               <span className="text-slate-400">{t('overheated')}：</span>
-              <span className="text-rose-600 font-black tracking-widest">${(pbFair * 1.6).toFixed(1)} {t('above')}</span>
+              <span className="text-rose-600 font-black tracking-widest">${(fairAnchor * 1.35).toFixed(1)} {t('above')}</span>
             </div>
           </div>
         </div>
@@ -480,7 +559,7 @@ const Dashboard = () => {
       if (!result || !result.history || result.history.length === 0) {
         throw new Error('查無歷史交易數據，請確認代號是否正確。');
       }
-      const val = calculateValuation(result.history, assumptions);
+      const val = calculateValuation(result.history, assumptions, result.medianPE);
       // Ensure we have something to show
       if (!val && !result.isETF) {
          throw new Error('該股票數據結構異常，無法進行估值分析。');

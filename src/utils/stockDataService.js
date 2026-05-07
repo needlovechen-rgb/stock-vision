@@ -235,7 +235,6 @@ export async function fetchStockData(symbol) {
     
     const stockName = resolvedName || rtMeta.longName || yahooPrice.longName || yahooPrice.shortName || yahooSymbol.replace('.TW', '');
     let currentPrice = to2(rtMeta.regularMarketPrice || yahooFin.currentPrice?.raw || yahooPrice.regularMarketPrice?.raw || 0);
-    const epsTTM = to2(yahooStats.trailingEps?.raw || 0);
     // Reverse engineer current BVPS if Yahoo hides bookValue but provides PriceToBook
     const currentPbRatio = yahooStats.priceToBook?.raw;
     const computedYahooBvps = currentPbRatio && currentPrice ? (currentPrice / currentPbRatio) : null;
@@ -259,6 +258,23 @@ export async function fetchStockData(symbol) {
         }
       });
     }
+
+    // --- 加強版 TTM EPS 計算 (優先使用 FinMind 數據) ---
+    const sortedQuarters = Object.keys(epsMap).sort().reverse();
+    let computedTTM = 0;
+    if (sortedQuarters.length >= 4) {
+      for (let i = 0; i < 4; i++) {
+        computedTTM += epsMap[sortedQuarters[i]] || 0;
+      }
+    } else if (sortedQuarters.length > 0) {
+      // 如果數據不足四季，則進行年化處理
+      const sum = sortedQuarters.reduce((acc, q) => acc + (epsMap[q] || 0), 0);
+      computedTTM = (sum / sortedQuarters.length) * 4;
+    }
+    
+    // 優先使用計算出的 TTM，若為 0 則使用 Yahoo 的作為備援
+    const finalEpsTTM = computedTTM > 0 ? to2(computedTTM) : to2(yahooStats.trailingEps?.raw || 0);
+    const epsTTM = finalEpsTTM;
 
     // Process FinMind Balance Sheet (The Most Accurate Method: Equity ÷ Shares)
     if (fmBalanceSheet && fmBalanceSheet.data) {
