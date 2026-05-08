@@ -494,7 +494,10 @@ export async function fetchStockData(symbol) {
     const multipliers = [];
     yearlyStats.forEach(y => {
       const yearStr = y.year;
-      const annualEps = (epsMap[`${yearStr}-Q1`] || 0) + (epsMap[`${yearStr}-Q2`] || 0) + (epsMap[`${yearStr}-Q3`] || 0) + (epsMap[`${yearStr}-Q4`] || 0);
+      // FIX: Sum EPS from historyData to include fallback estimates and current available quarters
+      const annualEps = historyData
+        .filter(h => h.quarter.startsWith(yearStr))
+        .reduce((sum, h) => sum + (h.eps || 0), 0);
       y.totalEps = annualEps;
       
       const midPrice = (y.high + y.low) / 2;
