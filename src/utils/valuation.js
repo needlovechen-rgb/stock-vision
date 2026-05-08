@@ -9,7 +9,7 @@
 
 export const calculateValuation = (
   data,
-  assumptions = { growthRate: 0.05, discountRate: 0.1, terminalGrowth: 0.02 },
+  assumptions = { growthRate: 0.06, discountRate: 0.095, terminalGrowth: 0.02 },
   externalMedianPE = null   // ← from stockDataService.medianPE (authoritative)
 ) => {
   if (!data || data.length === 0) return null;
@@ -64,10 +64,10 @@ export const calculateValuation = (
     avgPE = validPE.length > 0 ? validPE[Math.floor(validPE.length / 2)] : 15;
   }
 
-  // Mild compression for very high PE stocks (e.g. growth stocks with PE > 30)
-  if (avgPE > 30) avgPE = 30 + (avgPE - 30) * 0.4;
-  const minPE = avgPE * 0.7;
-  const maxPE = avgPE * 1.3;
+  // Mild compression for very high PE stocks (e.g. growth stocks with PE > 45)
+  if (avgPE > 45) avgPE = 45 + (avgPE - 45) * 0.7;
+  const minPE = avgPE * 0.8; // Higher floor for growth stocks
+  const maxPE = avgPE * 1.4; // Higher ceiling to capture breakout phases
 
   // ── 2. P/B Calibration (Asset-based) ──────────────────────────────────────
   const currentBVPS = data[data.length - 1].bvps || 20;
@@ -96,10 +96,11 @@ export const calculateValuation = (
     if (ttmEps <= 0) {
       smoothFair = yrMid;
     } else {
-      // 向上夾斷 (避免過高估值)
-      if (rawFair > yHigh) smoothFair = yHigh;
-      // 向下夾斷 (價值下限保護：不應低於年度低價的 85%)
-      else if (rawFair < yLow * 0.85) smoothFair = (rawFair + yLow) / 2;
+      // 向上夾斷 (大幅放寬：允許超越年度高點 25%，捕捉強勢股動能)
+      if (rawFair > yHigh * 1.25) smoothFair = yHigh * 1.25;
+      // 向下夾斷 (價值下限保護：不應低於年度低價的 95%)
+      else if (rawFair < yLow * 0.95) smoothFair = (rawFair + yLow) / 2;
+      else smoothFair = rawFair;
     }
 
     // DCF: Dynamic per-point (Resilient Model)
@@ -124,8 +125,9 @@ export const calculateValuation = (
     const pTerm = (pFCF * (1 + assumptions.terminalGrowth)) / (Math.max(0.01, assumptions.discountRate - assumptions.terminalGrowth));
     pointDCF += pTerm / Math.pow(1 + assumptions.discountRate, 5);
 
-    // Safety Floor: intrinsic value should not be below Book Value
-    pointDCF = Math.max(pointDCF, d.bvps || 0);
+    // Safety Floor: intrinsic value should not be below Book Value or 65% of Market Midpoint
+    const marketFloor = yrMid * 0.65;
+    pointDCF = Math.max(pointDCF, marketFloor, d.bvps || 0);
 
     return {
       ...d,

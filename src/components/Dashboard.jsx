@@ -220,7 +220,7 @@ const IndicatorRow = ({ label, val, current, color }) => {
         <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
         <span className="text-[11px] font-bold text-slate-400">{label}</span>
       </div>
-      <span className={`text-xs font-black ${diff >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+      <span className={`text-xs font-black ${diff >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
         {diff >= 0 ? '+' : ''}{diff.toFixed(2)}%
       </span>
     </div>
@@ -235,14 +235,35 @@ const StrategyTable = ({ stockInfo, valuation, t }) => {
   const dcfFair = valuation.dcf?.fair || 0;
   const currentPrice = stockInfo.currentPrice;
 
-  // ── 三合一合理價：改採「中位數」法，排除極端偏離的模型，確保錨點穩健 ──
+  // ── 三合一合理價：綜合模型估值與年度歷史規律 ────────────────────────────
+  // 加入年度歷史合理價 (當年度的高低價中點)，這能反映市場對目前業績與題材的實際評價
+  const yearlyFair = stockInfo.yearlyStats?.[0]?.historicalFairPrice || 0;
+  
+  // 原有的模型估值群組 (PE/PB/DCF)
   const validFairs = [peFair, pbFair, dcfFair].filter(v => v > 0).sort((a, b) => a - b);
-  let fairAnchor = currentPrice;
+  
+  // 取模型中位數
+  let modelMedian = currentPrice;
   if (validFairs.length === 3) {
-    fairAnchor = validFairs[1]; // 取中位數
+    modelMedian = validFairs[1];
   } else if (validFairs.length > 0) {
-    fairAnchor = validFairs.reduce((a, b) => a + b, 0) / validFairs.length; // 僅 1~2 個有效時取平均
+    modelMedian = validFairs.reduce((a, b) => a + b, 0) / validFairs.length;
   }
+
+  // 綜合判斷：如果年度歷史合理價顯著高於模型（代表強勁市場動能或未來溢價），
+  // 則錨點應該向市場現實靠攏，而非死守落後的歷史 TTM 模型。
+  let fairAnchor = modelMedian;
+  if (yearlyFair > 0) {
+    // 如果年度合理價遠高於模型，採加權平均 (40% 模型, 60% 現實歷史規律)
+    if (yearlyFair > modelMedian * 1.1) {
+      fairAnchor = (modelMedian * 0.4) + (yearlyFair * 0.6);
+    } else {
+      fairAnchor = (modelMedian + yearlyFair) / 2;
+    }
+  }
+  
+  // 防呆：錨點不應偏離現價過於離譜 (至少要有現價的 65%)
+  fairAnchor = Math.max(fairAnchor, currentPrice * 0.65);
 
   // ── PB 區間：依實際 avg / min / max 動態計算，避免硬編碼 ──
   const pbAvg = valuation.pb?.avg || 1.0;
@@ -278,10 +299,10 @@ const StrategyTable = ({ stockInfo, valuation, t }) => {
 
   // ── 各區間定義（以 fairAnchor 為軸心） ──
   const z5lo = fairAnchor * 1.25;                      // 避開風險：> 125%
-  const z4lo = fairAnchor * 1.10; const z4hi = z5lo;  // 保守減碼：110%~125%
-  const z3lo = fairAnchor * 0.95; const z3hi = z4lo;  // 中性持有：95%~110%
-  const z2lo = fairAnchor * 0.80; const z2hi = z3lo;  // 分批買進：80%~95%
-  const z1hi = z2lo;                                   // 強烈買進：< 80%
+  const z4lo = fairAnchor * 1.08; const z4hi = z5lo;  // 保守減碼：108%~125% (原 110%)
+  const z3lo = fairAnchor * 0.97; const z3hi = z4lo;  // 中性持有：97%~108% (原 95%~110%)
+  const z2lo = fairAnchor * 0.82; const z2hi = z3lo;  // 分批買進：82%~97% (原 80%~95%)
+  const z1hi = z2lo;                                   // 強烈買進：< 82% (原 80%)
 
   const levels = [
     {
@@ -384,17 +405,17 @@ const StrategyTable = ({ stockInfo, valuation, t }) => {
         </div>
         {currentPrice > 0 && (
           <div className={`flex items-center gap-1.5 px-3 py-1 rounded-lg border ${
-            currentPrice <= fairAnchor * 0.95 ? 'bg-emerald-500/10 border-emerald-500/20' :
-            currentPrice >= fairAnchor * 1.10 ? 'bg-rose-500/10 border-rose-500/20' :
+            currentPrice <= fairAnchor * 0.97 ? 'bg-emerald-500/10 border-emerald-500/20' :
+            currentPrice >= fairAnchor * 1.08 ? 'bg-rose-500/10 border-rose-500/20' :
             'bg-slate-500/10 border-slate-500/20'
           }`}>
             <span className={`text-[10px] font-black uppercase ${
-              currentPrice <= fairAnchor * 0.95 ? 'text-emerald-400' :
-              currentPrice >= fairAnchor * 1.10 ? 'text-rose-400' : 'text-slate-400'
+              currentPrice <= fairAnchor * 0.97 ? 'text-emerald-400' :
+              currentPrice >= fairAnchor * 1.08 ? 'text-rose-400' : 'text-slate-400'
             }`}>現價</span>
             <span className={`text-xs font-bold ${
-              currentPrice <= fairAnchor * 0.95 ? 'text-emerald-300' :
-              currentPrice >= fairAnchor * 1.10 ? 'text-rose-300' : 'text-slate-300'
+              currentPrice <= fairAnchor * 0.97 ? 'text-emerald-300' :
+              currentPrice >= fairAnchor * 1.08 ? 'text-rose-300' : 'text-slate-300'
             }`}>${currentPrice.toFixed(2)}</span>
           </div>
         )}
@@ -434,17 +455,17 @@ const StrategyTable = ({ stockInfo, valuation, t }) => {
             <div className="flex items-center gap-3 text-xs">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               <span className="text-slate-400">{t('batch_1')}：</span>
-              <span className="text-emerald-400 font-bold">${(fairAnchor * 0.95).toFixed(1)} {t('below')}</span>
+              <span className="text-emerald-400 font-bold">${(fairAnchor * 0.97).toFixed(1)} {t('below')}</span>
             </div>
             <div className="flex items-center gap-3 text-xs">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               <span className="text-slate-400">{t('batch_2')}：</span>
-              <span className="text-emerald-400 font-bold">${(fairAnchor * 0.85).toFixed(1)} {t('below')}</span>
+              <span className="text-emerald-400 font-bold">${(fairAnchor * 0.88).toFixed(1)} {t('below')}</span>
             </div>
             <div className="flex items-center gap-3 text-xs">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
               <span className="text-slate-400">{t('batch_3')}：</span>
-              <span className="text-rose-400 font-black tracking-widest animate-pulse">${(fairAnchor * 0.75).toFixed(1)} {t('below')}</span>
+              <span className="text-rose-400 font-black tracking-widest animate-pulse">${(fairAnchor * 0.80).toFixed(1)} {t('below')}</span>
             </div>
           </div>
         </div>
@@ -454,7 +475,7 @@ const StrategyTable = ({ stockInfo, valuation, t }) => {
             <div className="flex items-center gap-3 text-xs">
               <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
               <span className="text-slate-400">{t('exit_logic')}：</span>
-              <span className="text-rose-400 font-bold">${(fairAnchor * 1.10).toFixed(1)} ~ ${(fairAnchor * 1.25).toFixed(1)}</span>
+              <span className="text-rose-400 font-bold">${(fairAnchor * 1.08).toFixed(1)} ~ ${(fairAnchor * 1.25).toFixed(1)}</span>
             </div>
             <div className="flex items-center gap-3 text-xs">
               <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
@@ -1189,7 +1210,7 @@ const Dashboard = () => {
                       />
                       <Bar dataKey="eps" name="單季EPS">
                         {(stockInfo.history || []).map((entry, index) => (
-                           <Cell key={`eps-${index}`} fill={(entry.eps || 0) > 0 ? '#0d9488' : '#f43f5e'} />
+                           <Cell key={`eps-${index}`} fill={(entry.eps || 0) > 0 ? '#f43f5e' : '#0d9488'} />
                         ))}
                       </Bar>
                     </BarChart>
@@ -1607,10 +1628,10 @@ const Dashboard = () => {
                     const k2 = klineArr[idx - 1] || k1;
                     if (!k1?.dif || !k2?.dif) return null;
                     
-                    let msg = "Bearish"; let colorClass = "text-rose-400"; let dotColor = "#f43f5e";
-                    if (k1.dif > k1.dem && k2.dif <= k2.dem) { msg = "Golden Cross"; colorClass = "text-emerald-400"; dotColor = "#10b981"; }
-                    else if (k1.dif < k1.dem && k2.dif >= k2.dem) { msg = "Death Cross"; colorClass = "text-rose-400"; dotColor = "#f43f5e"; }
-                    else if (k1.dif > k1.dem) { msg = "Bullish Track"; colorClass = "text-emerald-400/80"; dotColor = "#34d399"; }
+                    let msg = "Bearish"; let colorClass = "text-emerald-400"; let dotColor = "#10b981";
+                    if (k1.dif > k1.dem && k2.dif <= k2.dem) { msg = "Golden Cross"; colorClass = "text-rose-400"; dotColor = "#f43f5e"; }
+                    else if (k1.dif < k1.dem && k2.dif >= k2.dem) { msg = "Death Cross"; colorClass = "text-emerald-400"; dotColor = "#10b981"; }
+                    else if (k1.dif > k1.dem) { msg = "Bullish Track"; colorClass = "text-rose-400/80"; dotColor = "#f43f5e"; }
 
                     return (
                       <div className="flex items-center gap-3">
@@ -1628,10 +1649,10 @@ const Dashboard = () => {
                     const rsi = p?.rsi;
                     if (rsi == null) return null;
                     
-                    let msg = `Weak (${rsi})`; let colorClass = "text-rose-400/80"; let dotColor = "#f43f5e";
+                    let msg = `Weak (${rsi})`; let colorClass = "text-emerald-400/80"; let dotColor = "#10b981";
                     if (rsi >= 70) { msg = `Overbought (${rsi})`; colorClass = "text-rose-400"; dotColor = "#f43f5e"; }
                     else if (rsi <= 30) { msg = `Oversold (${rsi})`; colorClass = "text-emerald-400"; dotColor = "#10b981"; }
-                    else if (rsi > 50) { msg = `Strong (${rsi})`; colorClass = "text-emerald-400/80"; dotColor = "#34d399"; }
+                    else if (rsi > 50) { msg = `Strong (${rsi})`; colorClass = "text-rose-400/80"; dotColor = "#f43f5e"; }
 
                     return (
                       <div className="flex items-center gap-3">

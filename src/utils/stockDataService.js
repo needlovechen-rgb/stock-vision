@@ -11,7 +11,6 @@ let activeProxyIndex = 0;
 const CORS_PROXIES = [
   'https://api.allorigins.win/get?url=',
   'https://corsproxy.io/?url=',
-  'https://api.codetabs.com/v1/proxy?quest=',
 ];
 
 const STOCK_NAME_MAP = {
@@ -34,13 +33,18 @@ async function fetchWithRetry(url, options = {}, retries = RETRY_LIMIT) {
   const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
   const internalOptions = { ...options, signal: controller.signal };
 
-  const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
-  if (isDev) {
+  const isLocal = typeof window !== 'undefined' && 
+                  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  const isDev = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV) || isLocal;
+  
+  if (isDev && url.startsWith('/')) {
     try {
       const response = await fetch(url, internalOptions);
       clearTimeout(timeoutId);
       if (response.ok) return await response.json();
+      console.warn(`[DataService] Local proxy failed with status ${response.status}, falling back to CORS proxies.`);
     } catch (err) {
+      console.warn(`[DataService] Local proxy connection failed: ${err.message}`);
       clearTimeout(timeoutId);
     }
   } else {
@@ -58,7 +62,15 @@ async function fetchWithRetry(url, options = {}, retries = RETRY_LIMIT) {
   for (const i of proxyIndices) {
     try {
       const proxyUrl = `${CORS_PROXIES[i]}${encodeURIComponent(targetUrl)}`;
-      const response = await fetch(proxyUrl, { signal: AbortSignal.timeout(FETCH_TIMEOUT) });
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+      
+      const response = await fetch(proxyUrl, { 
+        signal: controller.signal,
+        headers: { 'Accept': 'application/json' }
+      });
+      clearTimeout(id);
+      
       if (!response.ok) throw new Error(`Proxy error ${response.status}`);
       const data = await response.json();
       activeProxyIndex = i;
@@ -68,8 +80,16 @@ async function fetchWithRetry(url, options = {}, retries = RETRY_LIMIT) {
     }
   }
 
+  // Final resort: try direct fetch (might work if CORS is disabled in browser or via extension)
+  try {
+    const response = await fetch(targetUrl);
+    if (response.ok) return await response.json();
+  } catch (err) {
+    console.error(`[DataService] All fetch attempts failed for ${url}`);
+  }
+
   if (retries > 1) return fetchWithRetry(url, options, retries - 1);
-  throw new Error('所有數據源連線失敗');
+  throw new Error('所有數據源連線失敗，請檢查網路狀態或代理伺服器。');
 }
 
 async function fetchWithCache(url, cacheKey, durationMs = 604800000) { // Default 7 days

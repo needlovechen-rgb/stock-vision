@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+scratch/
+scripts/*.js
+!scripts/test_finmind.js
