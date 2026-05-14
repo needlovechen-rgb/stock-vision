@@ -210,21 +210,35 @@ export async function fetchStockData(symbol) {
 
     // Parallel Requests Plan
     const requests = [
-      // 1. Yahoo Price (Backup & Fast Summary)
-      fetchWithRetry(`/yahoo-api/v10/finance/quoteSummary/${yahooSymbol}?modules=defaultKeyStatistics,financialData,summaryDetail,price`).catch(() => ({})),
+      // 1. Yahoo Price (Backup & Fast Summary) - Fallback to .TWO for OTC stocks
+      (async () => {
+        let res = await fetchWithRetry(`/yahoo-api/v10/finance/quoteSummary/${yahooSymbol}?modules=defaultKeyStatistics,financialData,summaryDetail,price`, {}, 1).catch(() => null);
+        if ((!res || !res.quoteSummary?.result) && isTaiwan && stockId) {
+          res = await fetchWithRetry(`/yahoo-api/v10/finance/quoteSummary/${stockId}.TWO?modules=defaultKeyStatistics,financialData,summaryDetail,price`).catch(() => ({}));
+        }
+        return res || {};
+      })(),
       // 2. FinMind Historical Price (Primary for K-Line)
       stockId ? fetchWithRetry(`/finmind-api/api/v4/data?dataset=TaiwanStockPrice&data_id=${stockId}&start_date=${priceStartDate}`).catch(() => null) : Promise.resolve(null),
       // 3. FinMind Financial Statements (EPS, Income)
       stockId ? fetchWithCache(`/finmind-api/api/v4/data?dataset=TaiwanStockFinancialStatements&data_id=${stockId}&start_date=${financialStartDate}`, `fm_eps_${stockId}_${financialStartDate}`) : Promise.resolve(null),
       // 4. FinMind Stock Info (Primary for Name)
       (stockId && !STOCK_NAME_MAP[yahooSymbol]) ? fetchWithRetry(`/finmind-api/api/v4/data?dataset=TaiwanStockInfo&data_id=${stockId}`).catch(() => null) : Promise.resolve(null),
-      // 5. Yahoo Real-time Chart (Most reliable for current price)
-      fetchWithRetry(`/yahoo-api/v8/finance/chart/${yahooSymbol}?interval=1m&range=1d`).catch(() => ({})),
+      // 5. Yahoo Real-time Chart (Most reliable for current price) - Fallback to .TWO for OTC stocks
+      (async () => {
+        let res = await fetchWithRetry(`/yahoo-api/v8/finance/chart/${yahooSymbol}?interval=1m&range=1d`, {}, 1).catch(() => null);
+        if ((!res || !res.chart?.result) && isTaiwan && stockId) {
+          res = await fetchWithRetry(`/yahoo-api/v8/finance/chart/${stockId}.TWO?interval=1m&range=1d`).catch(() => ({}));
+        }
+        return res || {};
+      })(),
       // 6. FinMind Balance Sheet (For exact Book Value Per Share calculation: Equity / Shares)
-      stockId ? fetchWithCache(`/finmind-api/api/v4/data?dataset=TaiwanStockBalanceSheet&data_id=${stockId}&start_date=${financialStartDate}`, `fm_bs_${stockId}_${financialStartDate}`) : Promise.resolve(null)
+      stockId ? fetchWithCache(`/finmind-api/api/v4/data?dataset=TaiwanStockBalanceSheet&data_id=${stockId}&start_date=${financialStartDate}`, `fm_bs_${stockId}_${financialStartDate}`) : Promise.resolve(null),
+      // 7. FinMind Dividend (For 5-year average dividend)
+      stockId ? fetchWithCache(`/finmind-api/api/v4/data?dataset=TaiwanStockDividend&data_id=${stockId}&start_date=${financialStartDate}`, `fm_div_${stockId}_${financialStartDate}`) : Promise.resolve(null)
     ];
 
-    const [yahooSummary, fmPrice, fmFinancials, fmInfo, yahooRTChart, fmBalanceSheet] = await Promise.all(requests);
+    const [yahooSummary, fmPrice, fmFinancials, fmInfo, yahooRTChart, fmBalanceSheet, fmDividends] = await Promise.all(requests);
 
     // Process Name Resolution
     let resolvedName = STOCK_NAME_MAP[yahooSymbol] || null;
@@ -350,6 +364,37 @@ export async function fetchStockData(symbol) {
         }
       });
     }
+
+    // Process FinMind Dividend (Calculate 5-Year Average)
+    let avgDividend5Y = 0;
+    if (fmDividends && fmDividends.data && fmDividends.data.length > 0) {
+      const yearlyDiv = {};
+      fmDividends.data.forEach(item => {
+        const year = item.date.split('-')[0];
+        // FinMind uses PascalCase (CashEarningsDistribution) but we check all variations
+        const cash = Number(item.CashEarningsDistribution || item.cash_dividend || item.cash_earnings_distribution || item.value || 0);
+        const stock = Number(item.StockEarningsDistribution || item.stock_dividend || item.stock_earnings_distribution || 0);
+        const total = cash + stock;
+        
+        if (total > 0) yearlyDiv[year] = (yearlyDiv[year] || 0) + total;
+      });
+      const sortedYears = Object.keys(yearlyDiv).sort().reverse();
+      if (sortedYears.length > 0) {
+        // Use last 5 reported years
+        const slice = sortedYears.slice(0, 5).map(y => yearlyDiv[y]);
+        avgDividend5Y = slice.reduce((a, b) => a + b, 0) / slice.length;
+      }
+    }
+    
+    // Fallback to Yahoo if FinMind is zero or missing
+    if (!avgDividend5Y || avgDividend5Y === 0) {
+      const ySum = yahooSummary.quoteSummary?.result?.[0] || {};
+      const yDiv = ySum.summaryDetail?.dividendRate?.raw || 
+                   ySum.summaryDetail?.trailingAnnualDividendRate?.raw || 
+                   ySum.defaultKeyStatistics?.dividendRate?.raw || 0;
+      avgDividend5Y = yDiv;
+    }
+
 
     // Process K-Line (Primary: FinMind, Fallback: Yahoo could be added if needed)
     let klineRaw = [];
@@ -511,20 +556,35 @@ export async function fetchStockData(symbol) {
     const medianPE = sortedMults.length > 0 ? sortedMults[Math.floor(sortedMults.length / 2)] : 15;
 
     // Apply the consensus multiplier with REALITY CLAMPING
-    yearlyStats.forEach(y => {
+    yearlyStats.forEach((y, idx) => {
       const midPoint = (y.high + y.low) / 2;
-      const rawFair = (to2(y.totalEps) * medianPE);
+      
+      const yearStr = y.year;
+      
+      // For the most recent year (index 0), use TTM EPS or annualized projection to avoid partial-year underestimation
+      let effectiveEps = y.totalEps;
+      if (idx === 0) {
+        const currentYearQuarters = historyData.filter(h => h.quarter.startsWith(yearStr)).length;
+        const projectedEps = (currentYearQuarters > 0 && currentYearQuarters < 4) 
+          ? (y.totalEps / currentYearQuarters) * 4 
+          : y.totalEps;
+        effectiveEps = Math.max(epsTTM, projectedEps, y.totalEps);
+      }
+      
+      const rawFair = (to2(effectiveEps) * medianPE);
 
       // Historical BVPS Calculation: Find closest report for this year
-      const yearStr = y.year;
       y.bvps = to2(bvpsMap[yearStr]);
       if (!y.bvps) y.bvps = isETF ? to2(y.close) : to2(finalBVPS);
 
       // Reality Clamping logic:
-      if (y.totalEps <= 0) {
+      if (effectiveEps <= 0) {
+        y.historicalFairPrice = midPoint;
+      } else if (idx === 0) {
+        // 當年度 (idx === 0) 數值不夠精確，改為採用最高與最低價平均值
         y.historicalFairPrice = midPoint;
       } else if (rawFair > y.high) {
-        y.historicalFairPrice = y.high; // Cap at the high
+        y.historicalFairPrice = y.high; // Cap at the high for past years
       } else {
         y.historicalFairPrice = rawFair;
       }
@@ -620,7 +680,8 @@ export async function fetchStockData(symbol) {
       intraday,
       summary,
       kline,
-      medianPE
+      medianPE,
+      avgDividend5Y: to2(avgDividend5Y)
     };
 
     MEMORY_CACHE.set(yahooSymbol, { timestamp: Date.now(), data: result });

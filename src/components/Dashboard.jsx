@@ -254,16 +254,21 @@ const StrategyTable = ({ stockInfo, valuation, t }) => {
   // 則錨點應該向市場現實靠攏，而非死守落後的歷史 TTM 模型。
   let fairAnchor = modelMedian;
   if (yearlyFair > 0) {
-    // 如果年度合理價遠高於模型，採加權平均 (40% 模型, 60% 現實歷史規律)
-    if (yearlyFair > modelMedian * 1.1) {
-      fairAnchor = (modelMedian * 0.4) + (yearlyFair * 0.6);
+    // 如果年度合理價與模型有差異，採加權平均 (平衡模型與歷史規律)
+    if (yearlyFair > modelMedian * 1.15) {
+      fairAnchor = (modelMedian * 0.3) + (yearlyFair * 0.7); // 更向年度規律靠攏
     } else {
       fairAnchor = (modelMedian + yearlyFair) / 2;
     }
   }
   
-  // 防呆：錨點不應偏離現價過於離譜 (至少要有現價的 65%)
-  fairAnchor = Math.max(fairAnchor, currentPrice * 0.65);
+  // ── 動態調整：如果現價遠高於錨點且模型中位數也較高，則適度拉升錨點，避免進場策略過於保守 ──
+  if (currentPrice > fairAnchor * 1.1 && modelMedian > fairAnchor) {
+    fairAnchor = (fairAnchor * 0.7) + (Math.min(currentPrice, modelMedian) * 0.3);
+  }
+
+  // 防呆：錨點不應偏離現價過於離譜 (至少要有現價的 75%)
+  fairAnchor = Math.max(fairAnchor, currentPrice * 0.75);
 
   // ── PB 區間：依實際 avg / min / max 動態計算，避免硬編碼 ──
   const pbAvg = valuation.pb?.avg || 1.0;
@@ -1152,24 +1157,52 @@ const Dashboard = () => {
                         <th className="pb-4">{t('total_eps')}</th>
                         <th className="pb-4">{t('book_value')}</th>
                         <th className="pb-4">{t('fair_price')}</th>
+                        <th className="pb-4">評價與股利</th>
                       </tr>
                     </thead>
                     <tbody className="text-sm font-bold">
-                      {(stockInfo.yearlyStats || []).map((y, idx) => {
-                         // Use pre-calculated historical fair price from service calibration
-                         const displayFairPrice = y.historicalFairPrice || 0;
+                       {(() => {
+                         const yahooDiv = stockInfo.summary?.summaryDetail?.dividendRate?.raw || 
+                                          stockInfo.summary?.summaryDetail?.trailingAnnualDividendRate?.raw || 
+                                          stockInfo.summary?.defaultKeyStatistics?.dividendRate?.raw || 0;
+                         const finalDiv = stockInfo.avgDividend5Y > 0 ? stockInfo.avgDividend5Y : yahooDiv;
                          
-                         return (
-                           <tr key={`yr-${y.year}`} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
-                             <td className="py-4 pl-4 text-violet-400">{y.year}</td>
-                             <td className="py-4 text-emerald-400">${y.high?.toFixed(2) || '-'}</td>
-                             <td className="py-4 text-rose-400">${y.low?.toFixed(2) || '-'}</td>
-                             <td className="py-4 text-teal-400">{y.totalEps?.toFixed(2) || '-'}</td>
-                             <td className="py-4 text-slate-400">${y.bvps?.toFixed(2) || '-'}</td>
-                             <td className="py-4 text-blue-400 bg-blue-500/10 rounded-r-lg px-3 font-black">${displayFairPrice > 0 ? displayFairPrice.toFixed(2) : '-'}</td>
-                           </tr>
-                         );
-                      })}
+                         return stockInfo.yearlyStats?.map((y, idx) => {
+                           const displayFairPrice = y.historicalFairPrice || 0;
+                           return (
+                             <tr key={`yr-${y.year}`} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                               <td className="py-4 pl-4 text-violet-400">{y.year}</td>
+                               <td className="py-4 text-emerald-400">${y.high?.toFixed(2) || '-'}</td>
+                               <td className="py-4 text-rose-400">${y.low?.toFixed(2) || '-'}</td>
+                               <td className="py-4 text-teal-400">{y.totalEps?.toFixed(2) || '-'}</td>
+                               <td className="py-4 text-slate-400">${y.bvps?.toFixed(2) || '-'}</td>
+                               <td className="py-4 text-blue-400 bg-blue-500/10 rounded-r-lg px-3 font-black">${displayFairPrice > 0 ? displayFairPrice.toFixed(2) : '-'}</td>
+                               <td className="py-4 px-4 border-l border-white/5">
+                                 <div className="flex flex-col gap-1">
+                                   {(() => {
+                                     const isCurrentYear = idx === 0;
+                                     const effectiveEps = (isCurrentYear && stockInfo.epsTTM > y.totalEps) ? stockInfo.epsTTM : y.totalEps;
+                                     const pe = effectiveEps > 0 ? (y.close / effectiveEps) : null;
+                                     
+                                     let status = '--';
+                                     let statusColor = 'text-slate-500';
+                                     if (pe !== null) {
+                                       if (pe > 20) { status = '昂貴價'; statusColor = 'text-rose-400'; }
+                                       else if (pe >= 15) { status = '合理價'; statusColor = 'text-amber-400'; }
+                                       else { status = '便宜價'; statusColor = 'text-emerald-400'; }
+                                     } else if (effectiveEps <= 0) {
+                                       status = '虧損中';
+                                       statusColor = 'text-slate-500';
+                                     }
+                                     return <span className={`text-[10px] font-black ${statusColor}`}>{status} {pe ? `(PE:${pe.toFixed(1)})` : ''}</span>;
+                                   })()}
+                                   <span className="text-[10px] text-teal-400 font-bold">5Y⌀ Div: ${finalDiv > 0 ? finalDiv.toFixed(2) : '--'}</span>
+                                 </div>
+                               </td>
+                             </tr>
+                           );
+                         });
+                       })()}
                     </tbody>
                   </table>
                 </div>
