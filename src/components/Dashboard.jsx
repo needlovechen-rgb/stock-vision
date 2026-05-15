@@ -1008,8 +1008,8 @@ const Dashboard = () => {
                         <span className="text-sm font-bold text-slate-600">/</span>
                         <span className="text-lg font-black text-emerald-500">${stockInfo.realtime.dayLow.toFixed(2)}</span>
                       </div>
-                      <span className="text-[10px] font-bold text-slate-400 mt-0.5">
-                        中間價: <span className="text-amber-400 font-black">${((stockInfo.realtime.dayHigh + stockInfo.realtime.dayLow) / 2).toFixed(2)}</span>
+                      <span className="text-sm font-bold text-slate-400 mt-0.5">
+                        中間價: <span className="text-amber-400 font-black text-base">${((stockInfo.realtime.dayHigh + stockInfo.realtime.dayLow) / 2).toFixed(2)}</span>
                       </span>
                     </div>
                     <div className="flex flex-col">
@@ -1020,8 +1020,8 @@ const Dashboard = () => {
                         <span className="text-lg font-black text-emerald-400/80">${stockInfo.monthStats?.low?.toFixed(2) || '--'}</span>
                       </div>
                       {stockInfo.monthStats?.high && stockInfo.monthStats?.low && (
-                        <span className="text-[10px] font-bold text-slate-400 mt-0.5">
-                          中間價: <span className="text-amber-400/80 font-black">${((stockInfo.monthStats.high + stockInfo.monthStats.low) / 2).toFixed(2)}</span>
+                        <span className="text-sm font-bold text-slate-400 mt-0.5">
+                          中間價: <span className="text-amber-400/80 font-black text-base">${((stockInfo.monthStats.high + stockInfo.monthStats.low) / 2).toFixed(2)}</span>
                         </span>
                       )}
                     </div>
