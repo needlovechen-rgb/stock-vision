@@ -1025,6 +1025,7 @@ const Dashboard = () => {
                         </span>
                       )}
                     </div>
+                  </div>
 
                   <div className="h-10 w-[1px] bg-white/10 hidden md:block" />
 
