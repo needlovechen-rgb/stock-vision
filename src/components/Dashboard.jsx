@@ -965,25 +965,36 @@ const Dashboard = () => {
                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{t('price_change')}</span>
                     <div className="flex items-baseline gap-3">
                       <span className="text-5xl font-black tracking-tighter text-white">${stockInfo.currentPrice.toFixed(2)}</span>
-                      <div className={`flex flex-col font-black ${stockInfo.realtime.change >= 0 ? 'text-rose-500' : 'text-emerald-400'}`}>
-                        <div className="flex items-center gap-1 text-lg">
-                          {stockInfo.realtime.change >= 0 ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
-                          {stockInfo.realtime.change >= 0 ? '+' : ''}{stockInfo.realtime.change.toFixed(2)} ({stockInfo.realtime.changePercent.toFixed(2)}%)
-                        </div>
-                        {/* New Inline Premium Info */}
-                        {premiumInfo && (
-                          <div className={`flex items-center gap-2 text-[10px] mt-0.5 opacity-90 ${premiumInfo.colorClass}`}>
-                            <span className="bg-white/10 px-1.5 py-0.5 rounded text-[8px] uppercase tracking-tighter">開盤議價 {premiumInfo.rate >= 0 ? '+' : ''}{premiumInfo.rate.toFixed(1)}%</span>
-                            <span className="font-black">{premiumInfo.interpretation}</span>
-                            {premiumInfo.sentiment && <span className="opacity-60 text-[9px] border-l border-white/20 pl-2 ml-1">{premiumInfo.sentiment}</span>}
-                          </div>
-                        )}
+                      <div className={`flex items-center gap-1 font-black text-2xl ${stockInfo.realtime.change >= 0 ? 'text-rose-500' : 'text-emerald-400'}`}>
+                        {stockInfo.realtime.change >= 0 ? <TrendingUp size={24} /> : <TrendingDown size={24} />}
+                        {stockInfo.realtime.change >= 0 ? '+' : ''}{stockInfo.realtime.change.toFixed(2)} ({stockInfo.realtime.changePercent.toFixed(2)}%)
                       </div>
                     </div>
-                    {/* New: Book Value Per Share (BVPS) */}
-                    <div className="flex items-center gap-2 mt-1 opacity-70">
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{t('bvps')}:</span>
-                      <span className="text-lg font-black text-slate-300">${stockInfo.bvps?.toFixed(2) || '--'}</span>
+
+                    {/* 3rd Row: Combined BVPS and Premium Analysis */}
+                    <div className="flex items-center flex-wrap gap-x-4 gap-y-2 mt-2 pt-2 border-t border-white/5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{t('bvps')}:</span>
+                        <span className="text-xl font-black text-slate-200">${stockInfo.bvps?.toFixed(2) || '--'}</span>
+                      </div>
+                      
+                      {premiumInfo && (
+                        <>
+                          <div className="w-px h-4 bg-white/10 mx-1" />
+                          <div className={`flex items-center gap-3 font-black text-xl ${premiumInfo.colorClass}`}>
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">開盤議價:</span>
+                            <span>{premiumInfo.rate >= 0 ? '+' : ''}{premiumInfo.rate.toFixed(1)}%</span>
+                            <span className="opacity-60">|</span>
+                            <span>{premiumInfo.interpretation}</span>
+                            {premiumInfo.sentiment && (
+                              <>
+                                <span className="opacity-60">|</span>
+                                <span className="text-lg opacity-80">{premiumInfo.sentiment}</span>
+                              </>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
 
