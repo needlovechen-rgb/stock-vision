@@ -1024,7 +1024,7 @@ const Dashboard = () => {
                           中間價: <span className="text-amber-400/80 font-black">${((stockInfo.monthStats.high + stockInfo.monthStats.low) / 2).toFixed(2)}</span>
                         </span>
                       )}
-                  </div>
+                    </div>
 
                   <div className="h-10 w-[1px] bg-white/10 hidden md:block" />
 
