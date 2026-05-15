@@ -598,7 +598,7 @@ const Dashboard = () => {
           const s = typeof h === 'string' ? h : h.symbol;
           return s !== result.symbol && s !== searchSym; // ensure no duplicates of typed or resolved symbol
         });
-        return [{ symbol: result.symbol, name: result.name }, ...filtered].slice(0, 14);
+        return [{ symbol: result.symbol, name: result.name }, ...filtered].slice(0, 20);
       });
     } catch (err) {
       setError(err.message);
