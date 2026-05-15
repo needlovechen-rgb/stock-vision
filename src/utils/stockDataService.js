@@ -18,7 +18,8 @@ const STOCK_NAME_MAP = {
   '2303.TW': '聯電', '2308.TW': '台達電', '2317.TW': '鴻海', '2330.TW': '台積電', '2357.TW': '華碩',
   '2382.TW': '廣達', '2408.TW': '南亞科', '2412.TW': '中華電', '2454.TW': '聯發科', '2603.TW': '長榮',
   '2609.TW': '陽明', '2881.TW': '富邦金', '2882.TW': '國泰金', '2884.TW': '玉山金', '2886.TW': '兆豐金',
-  '2891.TW': '中信金', '3008.TW': '大立光', '3711.TW': '日月光投控', '5880.TW': '合庫金', '6505.TW': '台塑化'
+  '2891.TW': '中信金', '3008.TW': '大立光', '3711.TW': '日月光投控', '5880.TW': '合庫金', '6505.TW': '台塑化',
+  '0700.HK': '騰訊控股', '9988.HK': '阿里巴巴', '1299.HK': '友邦保險', '0005.HK': '匯豐控股', '3690.HK': '美團'
 };
 
 function parseProxyResponse(data) {
@@ -51,11 +52,16 @@ async function fetchWithRetry(url, options = {}, retries = RETRY_LIMIT) {
     clearTimeout(timeoutId);
   }
 
-  const targetUrl = url.startsWith('http') 
+  let targetUrl = url.startsWith('http') 
     ? url 
     : url.startsWith('/finmind-api')
       ? 'https://api.finmindtrade.com' + url.replace('/finmind-api', '')
       : 'https://query2.finance.yahoo.com' + url.replace('/yahoo-api', '');
+
+  // 增加對 Yahoo Query1 的備援支援
+  if (targetUrl.includes('finance.yahoo.com') && retries < RETRY_LIMIT) {
+    targetUrl = targetUrl.replace('query2', 'query1');
+  }
 
   const proxyIndices = [activeProxyIndex, ...CORS_PROXIES.map((_, i) => i).filter(i => i !== activeProxyIndex)];
   
@@ -188,9 +194,42 @@ export const calculateKD = (highs, lows, closes, p = 9) => {
 
 export async function fetchStockData(symbol) {
   const cleanSymbol = symbol.toUpperCase().trim();
-  // Strictly 4-6 digits or Taiwan ETF format (digits + suffix L/R/B/A)
-  const isTaiwan = /^(\d{4,6}[A-Z]?)$/.test(cleanSymbol) || cleanSymbol.endsWith('.TW') || cleanSymbol.endsWith('.TWO');
-  const yahooSymbol = (isTaiwan && !cleanSymbol.includes('.')) ? cleanSymbol + '.TW' : cleanSymbol;
+  
+  // 精準判斷市場
+  const isExplicitHK = cleanSymbol.endsWith('.HK');
+  const isExplicitTW = cleanSymbol.endsWith('.TW') || cleanSymbol.endsWith('.TWO');
+  
+  let isHongKong = isExplicitHK;
+  let isTaiwan = isExplicitTW;
+
+  if (!isExplicitHK && !isExplicitTW) {
+    if (/^\d{5}$/.test(cleanSymbol)) {
+      // 5 位數字通常為港股 (如 00700, 09988)
+      isHongKong = true;
+    } else if (/^\d{1,3}$/.test(cleanSymbol)) {
+      // 1-3 位數字通常為港股 (如 5, 700)
+      isHongKong = true;
+    } else if (/^\d{4}$/.test(cleanSymbol)) {
+      // 4 位數字：如果以 0 開頭但不是 00 開頭，通常是港股 (如 0700)
+      // 如果以 00 開頭，通常是台股 ETF (如 0050, 0056)
+      // 其他 1-9 開頭的 4 位數預設為台股
+      if (cleanSymbol.startsWith('0') && !cleanSymbol.startsWith('00')) {
+        isHongKong = true;
+      } else {
+        isTaiwan = true;
+      }
+    } else if (/^\d{6}$/.test(cleanSymbol)) {
+      // 6 位數字預設為台股 (如 006208, 00878 沒有 6 位，但有些認購權證是 6 位)
+      isTaiwan = true;
+    }
+  }
+
+  const yahooSymbol = isTaiwan 
+    ? (cleanSymbol.includes('.') ? cleanSymbol : cleanSymbol + '.TW')
+    : isHongKong
+      ? (cleanSymbol.includes('.') ? cleanSymbol : String(parseInt(cleanSymbol, 10)).padStart(4, '0') + '.HK')
+      : cleanSymbol;
+
   const stockId = isTaiwan ? yahooSymbol.split('.')[0] : null;
 
   if (MEMORY_CACHE.has(yahooSymbol)) {

@@ -3,12 +3,12 @@ import react from '@vitejs/plugin-react-swc'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  base: '/stock-vision/',
+  base: './',
   plugins: [react()],
   server: {
     proxy: {
       '/yahoo-api': {
-        target: 'https://query2.finance.yahoo.com',
+        target: 'https://query1.finance.yahoo.com',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/yahoo-api/, ''),
         secure: false,

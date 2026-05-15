@@ -1136,7 +1136,45 @@ const Dashboard = () => {
             />
           )}
 
-
+          {/* 5-Year ROE Chart */}
+          {valuationData && stockInfo.yearlyStats && (
+            <GlassCard className="p-8 border-l-[6px] border-l-orange-500 bg-white/[0.01] mt-8 mb-8">
+              <div className="flex items-center gap-3 mb-8">
+                <div className="p-2 bg-white/[0.05] rounded-xl">
+                  <TrendingUp size={18} className="text-orange-400" />
+                </div>
+                <h3 className="text-xl font-black italic tracking-tighter text-slate-300">5年 ROE 趨勢</h3>
+              </div>
+              <div className="w-full h-[200px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={stockInfo.yearlyStats.slice(0, 5).map(y => ({ year: y.year, eps: y.totalEps, roe: y.bvps > 0 ? parseFloat(((y.totalEps / y.bvps) * 100).toFixed(2)) : 0 })).reverse()}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis dataKey="year" tick={{ fontSize: 10, fill: '#475569' }} tickLine={false} axisLine={false} />
+                    <YAxis type="number" tick={{ fontSize: 10, fill: '#475569' }} tickLine={false} axisLine={false} width={45} tickFormatter={(val) => `${val}%`} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#020617', border: '1px solid #ffffff10', borderRadius: '12px' }} 
+                      itemStyle={{ fontSize: '11px', fontWeight: 900 }} 
+                      cursor={{fill: '#ffffff05'}}
+                      formatter={(value, name, props) => {
+                        return [
+                          <div className="flex flex-col gap-1">
+                            <span className="text-orange-400">ROE: {value}%</span>
+                            <span className="text-slate-400 text-[10px] font-medium">EPS: {props.payload.eps?.toFixed(2)}</span>
+                          </div>,
+                          ''
+                        ];
+                      }}
+                    />
+                    <Bar dataKey="roe" name="ROE" radius={[4, 4, 0, 0]}>
+                      {stockInfo.yearlyStats.slice(0, 5).map(y => ({ year: y.year, eps: y.totalEps, roe: y.bvps > 0 ? parseFloat(((y.totalEps / y.bvps) * 100).toFixed(2)) : 0 })).reverse().map((entry, index) => (
+                        <Cell key={`roe-${index}`} fill={entry.roe > 15 ? '#f97316' : entry.roe > 0 ? '#fbbf24' : '#64748b'} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </GlassCard>
+          )}
 
             {/* Annual Stats Table */}
             {valuationData && (
