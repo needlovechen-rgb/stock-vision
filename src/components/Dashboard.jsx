@@ -714,6 +714,59 @@ const Dashboard = () => {
     return { valSignal, kdSignal, highestPrice1Y };
   }, [stockInfo, computedKline, valuationData, t]);
 
+  // 3. Opening Premium Rate Analysis
+  const premiumInfo = useMemo(() => {
+    if (!stockInfo || !stockInfo.realtime || stockInfo.realtime.open === undefined || !stockInfo.realtime.prevClose) return null;
+    const { open, prevClose } = stockInfo.realtime;
+    if (open === 0) return null; 
+
+    const rate = ((open - prevClose) / prevClose) * 100;
+    
+    let interpretation = "";
+    let sentiment = "";
+    let colorClass = "";
+
+    if (rate >= 0) {
+      if (rate >= 7) {
+        interpretation = "過熱可能";
+        colorClass = "bg-rose-500/20 text-rose-400 border-rose-500/30 shadow-rose-500/10";
+      } else if (rate >= 3) {
+        interpretation = "強勢";
+        colorClass = "bg-rose-500/20 text-rose-400 border-rose-500/30 shadow-rose-500/10";
+      } else if (rate >= 1) {
+        interpretation = "偏強";
+        colorClass = "bg-rose-500/10 text-rose-400 border-rose-500/20";
+      } else {
+        interpretation = "普通";
+        colorClass = "bg-slate-500/10 text-slate-400 border-slate-500/20";
+      }
+    } else {
+      if (rate <= -7) {
+        interpretation = "極端恐慌";
+        sentiment = "情緒失控";
+        colorClass = "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-emerald-500/10";
+      } else if (rate <= -5) {
+        interpretation = "很弱";
+        sentiment = "利空衝擊";
+        colorClass = "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-emerald-500/10";
+      } else if (rate <= -3) {
+        interpretation = "弱勢";
+        sentiment = "恐慌開始";
+        colorClass = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+      } else if (rate <= -1) {
+        interpretation = "偏弱";
+        sentiment = "賣壓增加";
+        colorClass = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+      } else {
+        interpretation = "普通偏弱";
+        sentiment = "觀望";
+        colorClass = "bg-slate-500/10 text-slate-400 border-slate-500/20";
+      }
+    }
+
+    return { rate, interpretation, sentiment, colorClass };
+  }, [stockInfo]);
+
   // ---- Determine which view to render ----
   let viewKey = 'idle';
   if (loading) viewKey = 'loading';
@@ -862,6 +915,21 @@ const Dashboard = () => {
                   </div>
                   <div className="flex items-center gap-4">
                     <h2 className="text-6xl font-black tracking-tighter">{stockInfo.name}</h2>
+                    
+                    {/* Opening Premium Analysis Card */}
+                    {premiumInfo && (
+                      <div className={`p-3 rounded-2xl border shadow-lg flex flex-col gap-1 min-w-[140px] animate-in fade-in zoom-in duration-500 ${premiumInfo.colorClass}`}>
+                        <div className="flex justify-between items-center opacity-80">
+                          <span className="text-[9px] font-black uppercase tracking-tighter">開盤議價</span>
+                          <span className="text-xs font-black">{premiumInfo.rate >= 0 ? '+' : ''}{premiumInfo.rate.toFixed(2)}%</span>
+                        </div>
+                        <div className="text-xl font-black tracking-tighter leading-tight">{premiumInfo.interpretation}</div>
+                        {premiumInfo.sentiment && (
+                          <div className="text-[9px] font-bold opacity-70 uppercase tracking-widest">{premiumInfo.sentiment}</div>
+                        )}
+                      </div>
+                    )}
+
                     {analysisSignals && (
                       <div className="flex flex-col gap-2 ml-2">
                         {analysisSignals.valSignal && (
