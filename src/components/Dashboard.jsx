@@ -1008,6 +1008,9 @@ const Dashboard = () => {
                         <span className="text-sm font-bold text-slate-600">/</span>
                         <span className="text-lg font-black text-emerald-500">${stockInfo.realtime.dayLow.toFixed(2)}</span>
                       </div>
+                      <span className="text-[10px] font-bold text-slate-400 mt-0.5">
+                        中間價: <span className="text-amber-400 font-black">${((stockInfo.realtime.dayHigh + stockInfo.realtime.dayLow) / 2).toFixed(2)}</span>
+                      </span>
                     </div>
                     <div className="flex flex-col">
                       <span className="text-[9px] font-bold text-slate-500 uppercase">{t('month_range')}</span>
@@ -1016,7 +1019,11 @@ const Dashboard = () => {
                         <span className="text-sm font-bold text-slate-600">/</span>
                         <span className="text-lg font-black text-emerald-400/80">${stockInfo.monthStats?.low?.toFixed(2) || '--'}</span>
                       </div>
-                    </div>
+                      {stockInfo.monthStats?.high && stockInfo.monthStats?.low && (
+                        <span className="text-[10px] font-bold text-slate-400 mt-0.5">
+                          中間價: <span className="text-amber-400/80 font-black">${((stockInfo.monthStats.high + stockInfo.monthStats.low) / 2).toFixed(2)}</span>
+                        </span>
+                      )}
                   </div>
 
                   <div className="h-10 w-[1px] bg-white/10 hidden md:block" />
@@ -1290,9 +1297,9 @@ const Dashboard = () => {
                            return (
                              <tr key={`yr-${y.year}`} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
                                <td className="py-4 pl-4 text-violet-400">{y.year}</td>
-                               <td className="py-4 text-emerald-400">${y.high?.toFixed(2) || '-'}</td>
-                               <td className="py-4 text-rose-400">${y.low?.toFixed(2) || '-'}</td>
-                               <td className="py-4 text-teal-400">{y.totalEps?.toFixed(2) || '-'}</td>
+                               <td className="py-4 text-rose-400">${y.high?.toFixed(2) || '-'}</td>
+                               <td className="py-4 text-emerald-400">${y.low?.toFixed(2) || '-'}</td>
+                               <td className={`py-4 ${y.totalEps >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>{y.totalEps?.toFixed(2) || '-'}</td>
                                <td className="py-4 text-slate-400">${y.bvps?.toFixed(2) || '-'}</td>
                                <td className="py-4 text-blue-400 bg-blue-500/10 rounded-r-lg px-3 font-black">${displayFairPrice > 0 ? displayFairPrice.toFixed(2) : '-'}</td>
                                <td className="py-4 px-4 border-l border-white/5">
