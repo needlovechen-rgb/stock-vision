@@ -732,40 +732,40 @@ const Dashboard = () => {
     let colorClass = "";
 
     if (rate >= 0) {
+      colorClass = "text-rose-400"; // 正值統一為紅色系
       if (rate >= 7) {
         interpretation = "過熱可能";
-        colorClass = "text-rose-400";
+        sentiment = "情緒極度樂觀";
+      } else if (rate >= 5) {
+        interpretation = "非常強勢";
+        sentiment = "市場進入亢奮區";
       } else if (rate >= 3) {
         interpretation = "強勢";
-        colorClass = "text-rose-400";
+        sentiment = "多方情緒明顯升溫";
       } else if (rate >= 1) {
         interpretation = "偏強";
-        colorClass = "text-rose-400";
+        sentiment = "市場開始追價";
       } else {
-        interpretation = "普通";
-        colorClass = "text-slate-400";
+        interpretation = "普通偏強";
+        sentiment = "市場氣氛穩定";
       }
     } else {
+      colorClass = "text-emerald-400"; // 負值統一為綠色系
       if (rate <= -7) {
         interpretation = "極端恐慌";
         sentiment = "情緒失控";
-        colorClass = "text-emerald-400";
       } else if (rate <= -5) {
         interpretation = "很弱";
         sentiment = "利空衝擊";
-        colorClass = "text-emerald-400";
       } else if (rate <= -3) {
         interpretation = "弱勢";
         sentiment = "恐慌開始";
-        colorClass = "text-emerald-400";
       } else if (rate <= -1) {
         interpretation = "偏弱";
         sentiment = "賣壓增加";
-        colorClass = "text-emerald-400";
       } else {
         interpretation = "普通偏弱";
         sentiment = "觀望";
-        colorClass = "text-slate-400";
       }
     }
 
