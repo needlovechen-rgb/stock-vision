@@ -303,8 +303,8 @@ export async function fetchStockData(symbol) {
       dayLow: rtMeta.regularMarketDayLow || yahooPrice.regularMarketDayLow?.raw || 0,
       volume: rtMeta.regularMarketVolume || yahooPrice.regularMarketVolume?.raw || 0,
       time: rtMeta.regularMarketTime || yahooPrice.regularMarketTime || Math.floor(Date.now() / 1000),
-      prevClose: rtMeta.chartPreviousClose || rtMeta.previousClose || yahooPrice.regularMarketPreviousClose?.raw || 0,
-      open: rtMeta.regularMarketOpen || yahooPrice.regularMarketOpen?.raw || 0
+      prevClose: rtMeta.chartPreviousClose || rtMeta.previousClose || yahooPrice.regularMarketPreviousClose?.raw || summary.summaryDetail?.previousClose?.raw || 0,
+      open: rtMeta.regularMarketOpen || yahooPrice.regularMarketOpen?.raw || summary.summaryDetail?.open?.raw || 0
     };
     
     const stockName = resolvedName || rtMeta.longName || yahooPrice.longName || yahooPrice.shortName || yahooSymbol.replace('.TW', '');

@@ -716,9 +716,14 @@ const Dashboard = () => {
 
   // 3. Opening Premium Rate Analysis
   const premiumInfo = useMemo(() => {
-    if (!stockInfo || !stockInfo.realtime || stockInfo.realtime.open === undefined || !stockInfo.realtime.prevClose) return null;
-    const { open, prevClose } = stockInfo.realtime;
-    if (open === 0) return null; 
+    if (!stockInfo || !stockInfo.realtime) return null;
+    
+    // 取得開盤價 (優先使用即時開盤，若為 0 則使用現價作為保險)
+    const open = stockInfo.realtime.open || stockInfo.currentPrice;
+    // 取得昨日收盤價 (優先使用 API 欄位，若無則透過現價與漲跌反推)
+    const prevClose = stockInfo.realtime.prevClose || (stockInfo.currentPrice - (stockInfo.realtime.change || 0));
+    
+    if (!prevClose || !open) return null;
 
     const rate = ((open - prevClose) / prevClose) * 100;
     
@@ -729,38 +734,38 @@ const Dashboard = () => {
     if (rate >= 0) {
       if (rate >= 7) {
         interpretation = "過熱可能";
-        colorClass = "bg-rose-500/20 text-rose-400 border-rose-500/30 shadow-rose-500/10";
+        colorClass = "text-rose-400";
       } else if (rate >= 3) {
         interpretation = "強勢";
-        colorClass = "bg-rose-500/20 text-rose-400 border-rose-500/30 shadow-rose-500/10";
+        colorClass = "text-rose-400";
       } else if (rate >= 1) {
         interpretation = "偏強";
-        colorClass = "bg-rose-500/10 text-rose-400 border-rose-500/20";
+        colorClass = "text-rose-400";
       } else {
         interpretation = "普通";
-        colorClass = "bg-slate-500/10 text-slate-400 border-slate-500/20";
+        colorClass = "text-slate-400";
       }
     } else {
       if (rate <= -7) {
         interpretation = "極端恐慌";
         sentiment = "情緒失控";
-        colorClass = "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-emerald-500/10";
+        colorClass = "text-emerald-400";
       } else if (rate <= -5) {
         interpretation = "很弱";
         sentiment = "利空衝擊";
-        colorClass = "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-emerald-500/10";
+        colorClass = "text-emerald-400";
       } else if (rate <= -3) {
         interpretation = "弱勢";
         sentiment = "恐慌開始";
-        colorClass = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+        colorClass = "text-emerald-400";
       } else if (rate <= -1) {
         interpretation = "偏弱";
         sentiment = "賣壓增加";
-        colorClass = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+        colorClass = "text-emerald-400";
       } else {
         interpretation = "普通偏弱";
         sentiment = "觀望";
-        colorClass = "bg-slate-500/10 text-slate-400 border-slate-500/20";
+        colorClass = "text-slate-400";
       }
     }
 
@@ -916,20 +921,6 @@ const Dashboard = () => {
                   <div className="flex items-center gap-4">
                     <h2 className="text-6xl font-black tracking-tighter">{stockInfo.name}</h2>
                     
-                    {/* Opening Premium Analysis Card */}
-                    {premiumInfo && (
-                      <div className={`p-3 rounded-2xl border shadow-lg flex flex-col gap-1 min-w-[140px] animate-in fade-in zoom-in duration-500 ${premiumInfo.colorClass}`}>
-                        <div className="flex justify-between items-center opacity-80">
-                          <span className="text-[9px] font-black uppercase tracking-tighter">開盤議價</span>
-                          <span className="text-xs font-black">{premiumInfo.rate >= 0 ? '+' : ''}{premiumInfo.rate.toFixed(2)}%</span>
-                        </div>
-                        <div className="text-xl font-black tracking-tighter leading-tight">{premiumInfo.interpretation}</div>
-                        {premiumInfo.sentiment && (
-                          <div className="text-[9px] font-bold opacity-70 uppercase tracking-widest">{premiumInfo.sentiment}</div>
-                        )}
-                      </div>
-                    )}
-
                     {analysisSignals && (
                       <div className="flex flex-col gap-2 ml-2">
                         {analysisSignals.valSignal && (
@@ -974,9 +965,19 @@ const Dashboard = () => {
                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">{t('price_change')}</span>
                     <div className="flex items-baseline gap-3">
                       <span className="text-5xl font-black tracking-tighter text-white">${stockInfo.currentPrice.toFixed(2)}</span>
-                      <div className={`flex items-center gap-1 font-black text-lg ${stockInfo.realtime.change >= 0 ? 'text-rose-500' : 'text-emerald-400'}`}>
-                        {stockInfo.realtime.change >= 0 ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
-                        {stockInfo.realtime.change >= 0 ? '+' : ''}{stockInfo.realtime.change.toFixed(2)} ({stockInfo.realtime.changePercent.toFixed(2)}%)
+                      <div className={`flex flex-col font-black ${stockInfo.realtime.change >= 0 ? 'text-rose-500' : 'text-emerald-400'}`}>
+                        <div className="flex items-center gap-1 text-lg">
+                          {stockInfo.realtime.change >= 0 ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
+                          {stockInfo.realtime.change >= 0 ? '+' : ''}{stockInfo.realtime.change.toFixed(2)} ({stockInfo.realtime.changePercent.toFixed(2)}%)
+                        </div>
+                        {/* New Inline Premium Info */}
+                        {premiumInfo && (
+                          <div className={`flex items-center gap-2 text-[10px] mt-0.5 opacity-90 ${premiumInfo.colorClass}`}>
+                            <span className="bg-white/10 px-1.5 py-0.5 rounded text-[8px] uppercase tracking-tighter">開盤議價 {premiumInfo.rate >= 0 ? '+' : ''}{premiumInfo.rate.toFixed(1)}%</span>
+                            <span className="font-black">{premiumInfo.interpretation}</span>
+                            {premiumInfo.sentiment && <span className="opacity-60 text-[9px] border-l border-white/20 pl-2 ml-1">{premiumInfo.sentiment}</span>}
+                          </div>
+                        )}
                       </div>
                     </div>
                     {/* New: Book Value Per Share (BVPS) */}
