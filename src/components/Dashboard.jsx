@@ -550,7 +550,15 @@ const Dashboard = () => {
   const [lang, setLang] = useState(() => localStorage.getItem('stock_vision_lang') || 'zh');
   const [qualityStocks, setQualityStocks] = useState(() => {
     const saved = localStorage.getItem('quality_stocks_cache');
-    return saved ? JSON.parse(saved) : [];
+    if (saved) return JSON.parse(saved);
+    // 預設高品質清單，確保初次載入即顯示
+    return [
+      { symbol: '2812.TW', name: '台中銀' }, { symbol: '1101.TW', name: '台泥' },
+      { symbol: '2317.TW', name: '鴻海' }, { symbol: '2886.TW', name: '兆豐金' },
+      { symbol: '2330.TW', name: '台積電' }, { symbol: '2884.TW', name: '玉山金' },
+      { symbol: '5880.TW', name: '合庫金' }, { symbol: '2891.TW', name: '中信金' },
+      { symbol: '2412.TW', name: '中華電' }, { symbol: '2002.TW', name: '中鋼' }
+    ];
   });
 
   // Translation helper
@@ -577,8 +585,8 @@ const Dashboard = () => {
   // Background fetch quality candidates
   useEffect(() => {
     const fetchQuality = async () => {
-      // If we already have fresh quality stocks (less than 6 hours old), skip
       const lastFetch = localStorage.getItem('quality_stocks_last_fetch');
+      // 6 小時內更新過且已有資料則跳過
       if (lastFetch && (Date.now() - parseInt(lastFetch) < 21600000) && qualityStocks.length >= 10) return;
 
       const candidates = [
@@ -587,32 +595,33 @@ const Dashboard = () => {
         '2884.TW', '3008.TW', '2308.TW', '2454.TW', '2881.TW'
       ];
       
-      const results = [];
-      // Fetch in chunks to avoid overwhelming or rate limits
-      for (let i = 0; i < candidates.length; i++) {
-        try {
-          const data = await fetchStockData(candidates[i]);
-          if (data) {
+      try {
+        // 並行請求以提升效率
+        const promises = candidates.map(s => fetchStockData(s).catch(() => null));
+        const allData = await Promise.all(promises);
+        
+        const results = allData
+          .filter(data => {
+            if (!data) return false;
             const p = data.currentPrice;
             const bv = data.bvps;
             const pe = data.epsTTM > 0 ? p / data.epsTTM : 999;
             const eps5YPos = data.yearlyStats?.slice(0, 5).every(y => y.totalEps > 0);
-            
-            if (p < bv || eps5YPos || pe < 20) {
-              results.push({ symbol: data.symbol, name: data.name });
-            }
-          }
-          if (results.length >= 10) break;
-        } catch (e) {}
-      }
-      if (results.length > 0) {
-        setQualityStocks(results);
-        localStorage.setItem('quality_stocks_last_fetch', Date.now().toString());
+            return p < bv || eps5YPos || pe < 20;
+          })
+          .map(data => ({ symbol: data.symbol, name: data.name }))
+          .slice(0, 10);
+
+        if (results.length >= 5) { // 至少要有 5 檔符合才更新
+          setQualityStocks(results);
+          localStorage.setItem('quality_stocks_last_fetch', Date.now().toString());
+        }
+      } catch (e) {
+        console.error("Quality fetch error:", e);
       }
     };
 
-    // Delay a bit to not compete with initial load
-    const timer = setTimeout(fetchQuality, 3000);
+    const timer = setTimeout(fetchQuality, 2000);
     return () => clearTimeout(timer);
   }, []);
 
