@@ -1089,6 +1089,42 @@ const Dashboard = () => {
                         </>
                       )}
                     </div>
+
+                    {/* 4th Row: Daily PE High/Low and Strategy Rating */}
+                    {stockInfo.epsTTM > 0 && (
+                      <div className="flex items-center flex-wrap gap-x-4 gap-y-2 mt-2 pt-2 border-t border-white/5 animate-in fade-in slide-in-from-left-4 duration-1000 delay-300">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">今日 PE:</span>
+                          <span className="text-xl font-black text-white">{(stockInfo.currentPrice / stockInfo.epsTTM).toFixed(1)}</span>
+                          {(() => {
+                            const pe = stockInfo.currentPrice / stockInfo.epsTTM;
+                            let rating = { text: "無", color: "text-slate-500", desc: "先觀望，不宜投入" };
+                            if (pe <= 8) rating = { text: "SSS", color: "text-rose-500", desc: "投入總金額 100%" };
+                            else if (pe <= 10) rating = { text: "SS", color: "text-rose-400", desc: "投入總金額 50%" };
+                            else if (pe <= 12) rating = { text: "S", color: "text-amber-400", desc: "投入總金額 30%" };
+                            else if (pe <= 15) rating = { text: "A", color: "text-emerald-400", desc: "投入總金額 10%" };
+                            
+                            return (
+                              <div className="flex items-center gap-3">
+                                <span className={`text-xl font-black ${rating.color}`}>({rating.text})</span>
+                                <div className="w-px h-4 bg-white/10 mx-1" />
+                                <span className="text-sm font-black text-slate-400 italic">建議: {rating.desc}</span>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                        <div className="w-px h-4 bg-white/10 mx-1" />
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">最高:</span>
+                          <span className="text-xl font-black text-rose-500">{(stockInfo.realtime.dayHigh / stockInfo.epsTTM).toFixed(1)}</span>
+                        </div>
+                        <div className="opacity-40 text-slate-600">|</div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">最低:</span>
+                          <span className="text-xl font-black text-emerald-400">{(stockInfo.realtime.dayLow / stockInfo.epsTTM).toFixed(1)}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="h-10 w-[1px] bg-white/10 hidden md:block" />
