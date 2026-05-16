@@ -531,7 +531,7 @@ class ErrorBoundary extends React.Component {
 // =============================================
 
 const Dashboard = () => {
-  const [symbol, setSymbol] = useState('');
+  const inputRef = React.useRef(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [stockInfo, setStockInfo] = useState(null);
@@ -571,9 +571,9 @@ const Dashboard = () => {
     setHoverPoint(null);
   }, []);
 
-  const handleSearch = useCallback(async (e) => {
+  const handleSearch = useCallback(async (e, manualSymbol = null) => {
     if (e) e.preventDefault();
-    const searchSym = symbol.trim();
+    const searchSym = (manualSymbol || inputRef.current?.value || '').trim();
     if (!searchSym) return;
 
     setLoading(true);
@@ -591,7 +591,7 @@ const Dashboard = () => {
          throw new Error('該股票數據結構異常，無法進行估值分析。');
       }
       setStockInfo({ ...result, valuation: val });
-      setSymbol(''); // 查詢成功後清空輸入框
+      if (inputRef.current) inputRef.current.value = ''; // 查詢成功後清空輸入框
       
       // Update history only on success
       setSearchHistory(prev => {
@@ -606,7 +606,7 @@ const Dashboard = () => {
     } finally {
       setLoading(false);
     }
-  }, [symbol, assumptions]);
+  }, [assumptions]);
 
   const valuationData = useMemo(() => {
     if (!stockInfo?.valuation) return null;
@@ -821,11 +821,10 @@ const Dashboard = () => {
 
         <form onSubmit={handleSearch} className="relative">
           <input 
+            ref={inputRef}
             type="text" 
             placeholder={t('placeholder')}
             className="w-full h-20 pl-10 pr-24 bg-white/[0.03] border border-white/10 rounded-[30px] font-black text-xl focus:border-violet-500 outline-none transition-all shadow-xl"
-            value={symbol}
-            onChange={(e) => setSymbol(e.target.value)}
           />
           <button type="submit" className="absolute right-3 top-3 h-14 px-8 bg-violet-600 hover:bg-violet-500 rounded-2xl font-black shadow-lg shadow-violet-600/30 transition-transform active:scale-95">
             {t('analyze')}
@@ -842,10 +841,10 @@ const Dashboard = () => {
               return (
               <div key={sym} className="relative group">
                 <button
-                  onClick={() => setSymbol(sym)}
+                  onClick={() => { if (inputRef.current) inputRef.current.value = sym; }}
                   onDoubleClick={() => {
-                    setSymbol(sym);
-                    setTimeout(() => handleSearch(null, sym), 0);
+                    if (inputRef.current) inputRef.current.value = sym;
+                    handleSearch(null, sym);
                   }}
                   className="px-4 py-1.5 bg-white/5 hover:bg-violet-600/20 border border-white/5 hover:border-violet-500/30 rounded-full text-[11px] font-bold text-slate-400 hover:text-violet-300 transition-all active:scale-95"
                 >
