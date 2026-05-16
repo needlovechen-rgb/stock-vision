@@ -591,6 +591,7 @@ const Dashboard = () => {
          throw new Error('該股票數據結構異常，無法進行估值分析。');
       }
       setStockInfo({ ...result, valuation: val });
+      setSymbol(''); // 查詢成功後清空輸入框
       
       // Update history only on success
       setSearchHistory(prev => {
