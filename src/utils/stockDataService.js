@@ -110,7 +110,7 @@ async function fetchWithCache(url, cacheKey, durationMs = 604800000) { // Defaul
           return parsed.data;
         }
       }
-    } catch (e) {} // Ignore parse errors
+    } catch (e) {}
   }
 
   const data = await fetchWithRetry(url).catch(() => null);
@@ -121,9 +121,43 @@ async function fetchWithCache(url, cacheKey, durationMs = 604800000) { // Defaul
         timestamp: Date.now(),
         data: data
       }));
-    } catch (e) {} // Ignore quota errors
+    } catch (e) {
+      // If quota exceeded, clear old keys starting with 'fm_'
+      if (e.name === 'QuotaExceededError') {
+        Object.keys(localStorage).forEach(k => {
+          if (k.startsWith('fm_')) localStorage.removeItem(k);
+        });
+      }
+    }
   }
   return data;
+}
+
+/**
+ * Persistent Historical Data Manager
+ * Stores daily price data to avoid re-fetching full 5-year history
+ */
+const HISTORY_PERSISTENT_LIMIT = 20; // Max number of stocks to store in local persistent cache
+
+function getPersistentHistory(symbol) {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    const saved = localStorage.getItem(`stock_hist_v1_${symbol}`);
+    return saved ? JSON.parse(saved) : null;
+  } catch (e) { return null; }
+}
+
+function savePersistentHistory(symbol, data) {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    // Basic cleanup to prevent quota issues
+    const keys = Object.keys(localStorage).filter(k => k.startsWith('stock_hist_v1_'));
+    if (keys.length >= HISTORY_PERSISTENT_LIMIT) {
+      // Simple LRU: remove first one (usually oldest in some browsers, but let's just pick one)
+      localStorage.removeItem(keys[0]);
+    }
+    localStorage.setItem(`stock_hist_v1_${symbol}`, JSON.stringify(data));
+  } catch (e) {}
 }
 
 const to2 = (val) => typeof val === 'number' ? Number(val.toFixed(2)) : null;
@@ -247,9 +281,27 @@ export async function fetchStockData(symbol) {
     const priceStartDate = fiveYearsAgo.toISOString().split('T')[0];
     const financialStartDate = fiveYearsAgo.toISOString().split('T')[0];
 
+    // --- Incremental Data Logic ---
+    const cachedHistory = getPersistentHistory(yahooSymbol);
+    let effectivePriceStartDate = priceStartDate;
+    let existingKlineData = [];
+
+    if (cachedHistory && cachedHistory.length > 0) {
+      const lastCachedDate = cachedHistory[cachedHistory.length - 1].date;
+      // If we have data and it's from at least the 5-year-ago mark, we can use it
+      if (lastCachedDate > priceStartDate) {
+        // Fetch from next day after last cached record
+        const nextDay = new Date(lastCachedDate);
+        nextDay.setDate(nextDay.getDate() + 1);
+        effectivePriceStartDate = nextDay.toISOString().split('T')[0];
+        existingKlineData = cachedHistory;
+        console.log(`[Incremental Fetch] ${yahooSymbol} from ${effectivePriceStartDate}`);
+      }
+    }
+
     // Parallel Requests Plan
     const requests = [
-      // 1. Yahoo Price (Backup & Fast Summary) - Fallback to .TWO for OTC stocks
+      // 1. Yahoo Price (Backup & Fast Summary)
       (async () => {
         let res = await fetchWithRetry(`/yahoo-api/v10/finance/quoteSummary/${yahooSymbol}?modules=defaultKeyStatistics,financialData,summaryDetail,price`, {}, 1).catch(() => null);
         if ((!res || !res.quoteSummary?.result) && isTaiwan && stockId) {
@@ -257,13 +309,13 @@ export async function fetchStockData(symbol) {
         }
         return res || {};
       })(),
-      // 2. FinMind Historical Price (Primary for K-Line)
-      stockId ? fetchWithRetry(`/finmind-api/api/v4/data?dataset=TaiwanStockPrice&data_id=${stockId}&start_date=${priceStartDate}`).catch(() => null) : Promise.resolve(null),
+      // 2. FinMind Historical Price (Primary for K-Line) - Now Incremental
+      stockId ? fetchWithRetry(`/finmind-api/api/v4/data?dataset=TaiwanStockPrice&data_id=${stockId}&start_date=${effectivePriceStartDate}`).catch(() => null) : Promise.resolve(null),
       // 3. FinMind Financial Statements (EPS, Income)
-      stockId ? fetchWithCache(`/finmind-api/api/v4/data?dataset=TaiwanStockFinancialStatements&data_id=${stockId}&start_date=${financialStartDate}`, `fm_eps_${stockId}_${financialStartDate}`) : Promise.resolve(null),
+      stockId ? fetchWithCache(`/finmind-api/api/v4/data?dataset=TaiwanStockFinancialStatements&data_id=${stockId}&start_date=${financialStartDate}`, `fm_eps_${stockId}_${financialStartDate.substring(0, 7)}`) : Promise.resolve(null),
       // 4. FinMind Stock Info (Primary for Name)
       (stockId && !STOCK_NAME_MAP[yahooSymbol]) ? fetchWithRetry(`/finmind-api/api/v4/data?dataset=TaiwanStockInfo&data_id=${stockId}`).catch(() => null) : Promise.resolve(null),
-      // 5. Yahoo Real-time Chart (Most reliable for current price) - Fallback to .TWO for OTC stocks
+      // 5. Yahoo Real-time Chart (Most reliable for current price)
       (async () => {
         let res = await fetchWithRetry(`/yahoo-api/v8/finance/chart/${yahooSymbol}?interval=1m&range=1d`, {}, 1).catch(() => null);
         if ((!res || !res.chart?.result) && isTaiwan && stockId) {
@@ -271,10 +323,10 @@ export async function fetchStockData(symbol) {
         }
         return res || {};
       })(),
-      // 6. FinMind Balance Sheet (For exact Book Value Per Share calculation: Equity / Shares)
-      stockId ? fetchWithCache(`/finmind-api/api/v4/data?dataset=TaiwanStockBalanceSheet&data_id=${stockId}&start_date=${financialStartDate}`, `fm_bs_${stockId}_${financialStartDate}`) : Promise.resolve(null),
-      // 7. FinMind Dividend (For 5-year average dividend)
-      stockId ? fetchWithCache(`/finmind-api/api/v4/data?dataset=TaiwanStockDividend&data_id=${stockId}&start_date=${financialStartDate}`, `fm_div_${stockId}_${financialStartDate}`) : Promise.resolve(null)
+      // 6. FinMind Balance Sheet
+      stockId ? fetchWithCache(`/finmind-api/api/v4/data?dataset=TaiwanStockBalanceSheet&data_id=${stockId}&start_date=${financialStartDate}`, `fm_bs_${stockId}_${financialStartDate.substring(0, 7)}`) : Promise.resolve(null),
+      // 7. FinMind Dividend
+      stockId ? fetchWithCache(`/finmind-api/api/v4/data?dataset=TaiwanStockDividend&data_id=${stockId}&start_date=${financialStartDate}`, `fm_div_${stockId}_${financialStartDate.substring(0, 7)}`) : Promise.resolve(null)
     ];
 
     const [yahooSummary, fmPrice, fmFinancials, fmInfo, yahooRTChart, fmBalanceSheet, fmDividends] = await Promise.all(requests);
@@ -436,10 +488,12 @@ export async function fetchStockData(symbol) {
     }
 
 
-    // Process K-Line (Primary: FinMind, Fallback: Yahoo could be added if needed)
+    // Process K-Line (Primary: FinMind, Fallback: Yahoo)
     let klineRaw = [];
+    let newKlineData = [];
+    
     if (fmPrice && fmPrice.data && Array.isArray(fmPrice.data)) {
-      klineRaw = fmPrice.data.map(d => ({
+      newKlineData = fmPrice.data.map(d => ({
         date: d.date,
         open: d.open,
         high: d.max,
@@ -447,13 +501,13 @@ export async function fetchStockData(symbol) {
         close: d.close,
         volume: Number(d.Trading_Volume || d.volume || d.trading_volume || 0)
       }));
-    } else {
-      // Fallback to Yahoo Chart if FinMind fails
+    } else if (!existingKlineData || existingKlineData.length === 0) {
+      // Fallback to Yahoo Chart only if we have no data at all
       const yahooChart = await fetchWithRetry(`/yahoo-api/v8/finance/chart/${yahooSymbol}?interval=1d&range=2y`).catch(() => ({}));
       const res = yahooChart.chart?.result?.[0] || {};
       const ts = res.timestamp || [];
       const q = res.indicators?.quote?.[0] || {};
-      klineRaw = ts.map((t, i) => ({
+      newKlineData = ts.map((t, i) => ({
         date: new Date(t * 1000).toISOString().split('T')[0],
         open: q.open?.[i],
         high: q.high?.[i],
@@ -461,6 +515,38 @@ export async function fetchStockData(symbol) {
         close: q.close?.[i],
         volume: q.volume?.[i]
       })).filter(d => d.close != null);
+    } else {
+      // If FinMind incremental fetch failed but we have existing data, we might try a small Yahoo fetch or just use what we have
+      const yahooChart = await fetchWithRetry(`/yahoo-api/v8/finance/chart/${yahooSymbol}?interval=1d&range=7d`).catch(() => ({}));
+      const res = yahooChart.chart?.result?.[0] || {};
+      const ts = res.timestamp || [];
+      const q = res.indicators?.quote?.[0] || {};
+      newKlineData = ts.map((t, i) => ({
+        date: new Date(t * 1000).toISOString().split('T')[0],
+        open: q.open?.[i],
+        high: q.high?.[i],
+        low: q.low?.[i],
+        close: q.close?.[i],
+        volume: q.volume?.[i]
+      })).filter(d => d.close != null && d.date > (existingKlineData[existingKlineData.length-1]?.date || ''));
+    }
+
+    // Merge Existing and New Data
+    if (existingKlineData.length > 0) {
+      const existingDates = new Set(existingKlineData.map(d => d.date));
+      const filteredNewData = newKlineData.filter(d => !existingDates.has(d.date));
+      klineRaw = [...existingKlineData, ...filteredNewData].sort((a, b) => a.date.localeCompare(b.date));
+    } else {
+      klineRaw = newKlineData;
+    }
+
+    // Save back to persistent storage
+    if (klineRaw.length > 0) {
+      // Keep only last 5 years to save space (approx 1300 records)
+      const fiveYearsAgoStr = fiveYearsAgo.toISOString().split('T')[0];
+      const trimmedHistory = klineRaw.filter(d => d.date >= fiveYearsAgoStr);
+      savePersistentHistory(yahooSymbol, trimmedHistory);
+      klineRaw = trimmedHistory;
     }
 
     // Patch today's data from Yahoo if missing from FinMind (Market is open or just closed)
