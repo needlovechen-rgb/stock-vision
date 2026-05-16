@@ -976,7 +976,7 @@ const Dashboard = () => {
                     <div className="flex items-center flex-wrap gap-x-4 gap-y-2 mt-2 pt-2 border-t border-white/5">
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{t('bvps')}:</span>
-                        <span className="text-xl font-black text-slate-200">${stockInfo.bvps?.toFixed(2) || '--'}</span>
+                        <span className={`text-xl font-black ${stockInfo.currentPrice < stockInfo.bvps ? 'text-rose-400' : 'text-white'}`}>${stockInfo.bvps?.toFixed(2) || '--'}</span>
                       </div>
                       
                       {premiumInfo && (
