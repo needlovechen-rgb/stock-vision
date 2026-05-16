@@ -93,7 +93,9 @@ const translations = {
     exit_logic: "開始減碼區間",
     overheated: "市場過熱/全部出場",
     below: "以下",
-    above: "以上"
+    above: "以上",
+    quality_picks: "優質精選",
+    quality_desc: "(P<BV 或 五年EPS>0 或 PE<20)"
   },
   en: {
     syncing: "Syncing global markets...",
@@ -546,6 +548,10 @@ const Dashboard = () => {
     return saved ? JSON.parse(saved) : [];
   });
   const [lang, setLang] = useState(() => localStorage.getItem('stock_vision_lang') || 'zh');
+  const [qualityStocks, setQualityStocks] = useState(() => {
+    const saved = localStorage.getItem('quality_stocks_cache');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   // Translation helper
   const t = useCallback((key) => translations[lang][key] || key, [lang]);
@@ -560,6 +566,55 @@ const Dashboard = () => {
   useEffect(() => {
     localStorage.setItem('stock_search_history', JSON.stringify(searchHistory));
   }, [searchHistory]);
+
+  // Sync quality stocks to localStorage
+  useEffect(() => {
+    if (qualityStocks.length > 0) {
+      localStorage.setItem('quality_stocks_cache', JSON.stringify(qualityStocks));
+    }
+  }, [qualityStocks]);
+
+  // Background fetch quality candidates
+  useEffect(() => {
+    const fetchQuality = async () => {
+      // If we already have fresh quality stocks (less than 6 hours old), skip
+      const lastFetch = localStorage.getItem('quality_stocks_last_fetch');
+      if (lastFetch && (Date.now() - parseInt(lastFetch) < 21600000) && qualityStocks.length >= 10) return;
+
+      const candidates = [
+        '2812.TW', '1101.TW', '2002.TW', '2330.TW', '2317.TW', 
+        '2886.TW', '2891.TW', '5880.TW', '2303.TW', '2412.TW',
+        '2884.TW', '3008.TW', '2308.TW', '2454.TW', '2881.TW'
+      ];
+      
+      const results = [];
+      // Fetch in chunks to avoid overwhelming or rate limits
+      for (let i = 0; i < candidates.length; i++) {
+        try {
+          const data = await fetchStockData(candidates[i]);
+          if (data) {
+            const p = data.currentPrice;
+            const bv = data.bvps;
+            const pe = data.epsTTM > 0 ? p / data.epsTTM : 999;
+            const eps5YPos = data.yearlyStats?.slice(0, 5).every(y => y.totalEps > 0);
+            
+            if (p < bv || eps5YPos || pe < 20) {
+              results.push({ symbol: data.symbol, name: data.name });
+            }
+          }
+          if (results.length >= 10) break;
+        } catch (e) {}
+      }
+      if (results.length > 0) {
+        setQualityStocks(results);
+        localStorage.setItem('quality_stocks_last_fetch', Date.now().toString());
+      }
+    };
+
+    // Delay a bit to not compete with initial load
+    const timer = setTimeout(fetchQuality, 3000);
+    return () => clearTimeout(timer);
+  }, []);
 
   const handleHover = useCallback((e) => {
     if (e && e.activePayload && e.activePayload[0]) {
@@ -863,6 +918,35 @@ const Dashboard = () => {
             >
               <Trash2 size={12} />
             </button>
+          </div>
+        )}
+
+        {/* Quality Picks Row */}
+        {qualityStocks.length > 0 && (
+          <div className="lg:col-span-3 flex flex-wrap gap-2 mt-2 px-2 pb-2">
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black text-violet-400 uppercase tracking-widest mr-2">{t('quality_picks')}:</span>
+              <span className="text-[8px] font-black text-slate-600 uppercase tracking-tighter mr-2">{t('quality_desc')}</span>
+            </div>
+            {qualityStocks.map((h) => (
+              <div key={h.symbol} className="relative group self-center">
+                <button
+                  onClick={() => { if (inputRef.current) inputRef.current.value = h.symbol; }}
+                  onDoubleClick={() => {
+                    if (inputRef.current) inputRef.current.value = h.symbol;
+                    handleSearch(null, h.symbol);
+                  }}
+                  className="px-4 py-1.5 bg-violet-600/5 hover:bg-violet-600/20 border border-violet-500/10 hover:border-violet-500/40 rounded-full text-[11px] font-bold text-violet-300 transition-all active:scale-95"
+                >
+                  {h.symbol.replace('.TW', '')}
+                </button>
+                {h.name && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-[#020617] text-violet-200 text-[11px] font-bold rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-20 border border-violet-500/30 shadow-xl shadow-violet-900/20">
+                    {h.name}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
 
