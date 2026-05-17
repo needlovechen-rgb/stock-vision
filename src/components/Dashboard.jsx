@@ -1216,7 +1216,7 @@ const Dashboard = () => {
                     </div>
                   </div>
 
-                  <div className="w-full h-[250px] flex items-center justify-center relative">
+                  <div className="w-full h-[300px] flex items-center justify-center relative">
                     {!hasData ? (
                       <div className="flex flex-col items-center gap-3 text-slate-500 animate-pulse">
                         <AlertTriangle size={48} className="opacity-20" />
@@ -1256,7 +1256,7 @@ const Dashboard = () => {
                         <YAxis 
                           yAxisId="volume"
                           hide
-                          domain={[0, (dataMax) => dataMax * 4]}
+                          domain={[0, (dataMax) => dataMax * 2]}
                         />
                         <ReferenceLine 
                           y={prevClose} 
