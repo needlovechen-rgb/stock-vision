@@ -529,6 +529,54 @@ class ErrorBoundary extends React.Component {
 }
 
 // =============================================
+// Custom Candlestick Shape for K-Line
+// =============================================
+const CandlestickShape = (props) => {
+  const { x, y, width, height, payload } = props;
+  if (!payload || x === undefined || y === undefined || width === undefined || height === undefined) {
+    return null;
+  }
+
+  const { open, high, low, close } = payload;
+  if (open == null || high == null || low == null || close == null) {
+    return null;
+  }
+
+  const isUp = close >= open;
+  // Taiwan stock color convention: UP is Red (#f43f5e), DOWN is Green (#10b981)
+  const color = isUp ? '#f43f5e' : '#10b981'; 
+
+  // The total price range is high - low
+  const priceRange = high - low;
+  const ratio = priceRange <= 0 ? 0 : height / priceRange;
+  
+  const topPrice = Math.max(open, close);
+  const bottomPrice = Math.min(open, close);
+  
+  // y represents the coordinate for high (highest point of the wick)
+  const yTop = y + (high - topPrice) * ratio;
+  const bodyHeight = Math.max(1.5, (topPrice - bottomPrice) * ratio); // Ensure body has at least 1.5px height for thin bodies
+  const center = x + width / 2;
+
+  return (
+    <g stroke={color} strokeWidth={1.5}>
+      {/* Wick (Shadows) - thin line representing High/Low range */}
+      <line x1={center} y1={y} x2={center} y2={y + height} />
+      {/* Body - rectangle representing Open/Close range */}
+      <rect 
+        x={x} 
+        y={yTop} 
+        width={width} 
+        height={bodyHeight} 
+        fill={isUp ? '#f43f5e' : '#10b981'} 
+        stroke={color}
+        strokeWidth={1.5}
+      />
+    </g>
+  );
+};
+
+// =============================================
 // Main Dashboard Component
 // =============================================
 
@@ -691,13 +739,35 @@ const Dashboard = () => {
     const kd = calculateKD(highs, lows, closes, kdPeriod);
     const macd = calculateMACD(closes, macdConfig.fast, macdConfig.slow, macdConfig.signal);
     
+    // Calculate MA120 for long-term trend
+    const calculateMAHelper = (data, p) => {
+      const result = new Array(data.length).fill(null);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        sum += (data[i] || 0);
+        if (i >= p) sum -= (data[i - p] || 0);
+        if (i >= p - 1) result[i] = sum / p;
+      }
+      return result;
+    };
+    const ma120 = calculateMAHelper(closes, 120);
+
+    // Calculate Volume MAs matching the photo
+    const volumes = stockInfo.kline.map(d => d.volume || 0);
+    const ma5Vol = calculateMAHelper(volumes, 5);
+    const ma10Vol = calculateMAHelper(volumes, 10);
+
     return stockInfo.kline.map((d, i) => ({
       ...d,
       kdK: kd.k[i],
       kdD: kd.d[i],
-      dif: macd.dif[i],
-      dem: macd.dem[i],
-      osc: macd.osc[i]
+      dif: macd.dif[i] ? Number(macd.dif[i].toFixed(2)) : null,
+      dem: macd.dem[i] ? Number(macd.dem[i].toFixed(2)) : null,
+      osc: macd.osc[i] ? Number(macd.osc[i].toFixed(2)) : null,
+      ma120: ma120[i] ? Number(ma120[i].toFixed(2)) : null,
+      ma5Vol: ma5Vol[i] ? Number(ma5Vol[i].toFixed(0)) : null,
+      ma10Vol: ma10Vol[i] ? Number(ma10Vol[i].toFixed(0)) : null,
+      range: [d.low, d.high]
     }));
   }, [stockInfo, kdPeriod, macdConfig]);
 
@@ -1656,7 +1726,138 @@ const Dashboard = () => {
                 </div>
               </div>
 
-              <div className="text-[10px] font-bold px-10 mb-2 flex gap-6">
+              {/* OHLC Floating Info Panel */}
+              {(() => {
+                const point = activeHoverPoint || (computedKline && computedKline[computedKline.length - 1]);
+                if (!point) return null;
+                const isUp = point.close >= point.open;
+                const priceColor = isUp ? 'text-rose-400' : 'text-emerald-400';
+                
+                return (
+                  <div className="px-10 mb-4 bg-white/[0.02] py-3.5 rounded-[24px] border border-white/5 mx-10 flex flex-col gap-3">
+                    {/* Row 1: Date & OHLCV */}
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs font-bold text-slate-400">
+                      <div>
+                        <span className="text-slate-500">日期:</span>{' '}
+                        <span className="text-white font-black">{point.date}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">開盤:</span>{' '}
+                        <span className="text-white font-black">${point.open?.toFixed(2)}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">最高:</span>{' '}
+                        <span className="text-rose-400 font-black">${point.high?.toFixed(2)}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">最低:</span>{' '}
+                        <span className="text-emerald-400 font-black">${point.low?.toFixed(2)}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">收盤:</span>{' '}
+                        <span className={`${priceColor} font-black`}>${point.close?.toFixed(2)}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">成交量:</span>{' '}
+                        <span className="text-violet-400 font-black">{point.volume?.toLocaleString()} 股</span>
+                      </div>
+                    </div>
+
+                    {/* Row 2: AI Tech Diagnosis (MA Deviations, MACD, RSI) */}
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px] font-bold border-t border-white/5 pt-3">
+                      <span className="text-violet-400 font-black flex items-center gap-1.5 mr-2">
+                        <BrainCircuit size={13} className="animate-pulse" /> AI 智能指標診斷:
+                      </span>
+                      
+                      {/* MA5 Deviation */}
+                      {(() => {
+                        const ma5Val = point.ma5;
+                        if (ma5Val == null) return null;
+                        const diff = ((point.close - ma5Val) / ma5Val) * 100;
+                        return (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-slate-500">MA5 乖離率:</span>
+                            <span className={`font-black ${diff >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                              {diff >= 0 ? '+' : ''}{diff.toFixed(2)}%
+                            </span>
+                          </div>
+                        );
+                      })()}
+
+                      {/* MA20 Deviation */}
+                      {(() => {
+                        const ma20Val = point.ma20;
+                        if (ma20Val == null) return null;
+                        const diff = ((point.close - ma20Val) / ma20Val) * 100;
+                        return (
+                          <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
+                            <span className="text-slate-500">MA20 乖離率:</span>
+                            <span className={`font-black ${diff >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                              {diff >= 0 ? '+' : ''}{diff.toFixed(2)}%
+                            </span>
+                          </div>
+                        );
+                      })()}
+
+                      {/* MA60 Deviation */}
+                      {(() => {
+                        const ma60Val = point.ma60;
+                        if (ma60Val == null) return null;
+                        const diff = ((point.close - ma60Val) / ma60Val) * 100;
+                        return (
+                          <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
+                            <span className="text-slate-500">MA60 乖離率:</span>
+                            <span className={`font-black ${diff >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                              {diff >= 0 ? '+' : ''}{diff.toFixed(2)}%
+                            </span>
+                          </div>
+                        );
+                      })()}
+
+                      {/* MACD Signal */}
+                      {(() => {
+                        const klineArr = computedKline || [];
+                        const idx = klineArr.findIndex(k => k.date === point.date);
+                        const k1 = point;
+                        const k2 = klineArr[idx - 1] || k1;
+                        if (!k1?.dif || !k2?.dif) return null;
+                        
+                        let msg = "空頭走勢"; let colorClass = "text-emerald-400";
+                        if (k1.dif > k1.dem && k2.dif <= k2.dem) { msg = "黃金交叉"; colorClass = "text-rose-400"; }
+                        else if (k1.dif < k1.dem && k2.dif >= k2.dem) { msg = "死亡交叉"; colorClass = "text-emerald-400"; }
+                        else if (k1.dif > k1.dem) { msg = "多頭走勢"; colorClass = "text-rose-400/80"; }
+                        
+                        return (
+                          <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
+                            <span className="text-slate-500">MACD 狀態:</span>
+                            <span className={`font-black ${colorClass}`}>{msg}</span>
+                          </div>
+                        );
+                      })()}
+
+                      {/* RSI Signal */}
+                      {(() => {
+                        const rsi = point.rsi;
+                        if (rsi == null) return null;
+                        
+                        let msg = `偏弱`; let colorClass = "text-emerald-400/80";
+                        if (rsi >= 80) { msg = `超買過熱`; colorClass = "text-rose-400 font-black"; }
+                        else if (rsi <= 20) { msg = `超賣低估`; colorClass = "text-emerald-400 font-black"; }
+                        else if (rsi > 50) { msg = `偏強`; colorClass = "text-rose-400/80"; }
+                        
+                        return (
+                          <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
+                            <span className="text-slate-500">RSI 指標:</span>
+                            <span className={`font-black ${colorClass}`}>{rsi.toFixed(2)} ({msg})</span>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="text-[10px] font-bold px-10 mb-2 flex gap-6 flex-wrap">
                 <div className="flex items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full bg-amber-400" />
                   <span className="text-slate-400">MA5:</span>
@@ -1672,10 +1873,15 @@ const Dashboard = () => {
                   <span className="text-slate-400">MA60:</span>
                   <span className="text-white font-black">{activeHoverPoint?.ma60?.toFixed(2) || (computedKline && computedKline[computedKline.length-1].ma60?.toFixed(2)) || '--'}</span>
                 </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-violet-500" />
+                  <span className="text-slate-400">MA120:</span>
+                  <span className="text-white font-black">{activeHoverPoint?.ma120?.toFixed(2) || (computedKline && computedKline[computedKline.length-1].ma120?.toFixed(2)) || '--'}</span>
+                </div>
               </div>
 
               {/* Price Chart */}
-              <div className="w-full h-[350px]">
+              <div className="w-full h-[420px]">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart 
                     data={computedKline} 
@@ -1689,7 +1895,16 @@ const Dashboard = () => {
                     <YAxis 
                       type="number" 
                       yAxisId="price"
-                      domain={['auto', 'auto']} 
+                      domain={[
+                        (dataMin) => {
+                          const pad = dataMin * 0.015;
+                          return Number((dataMin - pad).toFixed(2));
+                        },
+                        (dataMax) => {
+                          const pad = dataMax * 0.015;
+                          return Number((dataMax + pad).toFixed(2));
+                        }
+                      ]}
                       tick={{ fontSize: 10, fill: '#475569' }} 
                       width={60} 
                       tickLine={false} 
@@ -1700,14 +1915,11 @@ const Dashboard = () => {
                       itemStyle={{ fontSize: '12px', padding: 0 }}
                       formatter={(val) => typeof val === 'number' ? val.toFixed(2) : val}
                     />
-                    <Bar yAxisId="price" dataKey="close" barSize={4}>
-                      {(computedKline || []).map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.isUp ? '#ef4444' : '#22c55e'} opacity={0.6 + (index / (computedKline?.length || 1)) * 0.4} />
-                      ))}
-                    </Bar>
+                    <Bar yAxisId="price" dataKey="range" shape={<CandlestickShape />} maxBarSize={12} />
                     <Line yAxisId="price" type="monotone" dataKey="ma5" stroke="#fbbf24" strokeWidth={2.5} dot={false} connectNulls />
                     <Line yAxisId="price" type="monotone" dataKey="ma20" stroke="#3b82f6" strokeWidth={2.5} dot={false} connectNulls />
                     <Line yAxisId="price" type="monotone" dataKey="ma60" stroke="#ec4899" strokeWidth={2.5} dot={false} connectNulls />
+                    <Line yAxisId="price" type="monotone" dataKey="ma120" stroke="#8b5cf6" strokeWidth={2.5} dot={false} connectNulls />
                     <Brush dataKey="date" height={30} stroke="#8b5cf6" fill="#020617" />
                   </ComposedChart>
                 </ResponsiveContainer>
@@ -1715,7 +1927,7 @@ const Dashboard = () => {
 
               {/* MACD Chart */}
               <div className="w-full h-[120px] mt-2 border-t border-white/5 pt-2">
-                <div className="text-[9px] font-bold text-slate-500 mb-1 px-10 flex justify-between items-center">
+                <div className="text-[9px] font-bold text-slate-500 mb-1 px-10 flex flex-wrap items-center justify-between gap-4">
                   <div className="flex items-center gap-4">
                     <span>MACD ({macdConfig.fast}, {macdConfig.slow}, {macdConfig.signal})</span>
                     <div className="flex gap-1">
@@ -1734,6 +1946,11 @@ const Dashboard = () => {
                       ))}
                     </div>
                   </div>
+                  <div className="flex items-center gap-3 text-[10px]">
+                    <span className="text-[#3b82f6]">DIF: {(hoverPoint?.dif ?? computedKline?.[computedKline.length - 1]?.dif)?.toFixed(2) || '--'}</span>
+                    <span className="text-[#f59e0b]">DEM: {(hoverPoint?.dem ?? computedKline?.[computedKline.length - 1]?.dem)?.toFixed(2) || '--'}</span>
+                    <span className="text-[#ec4899]">OSC: {(hoverPoint?.osc ?? computedKline?.[computedKline.length - 1]?.osc)?.toFixed(2) || '--'}</span>
+                  </div>
                 </div>
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart 
@@ -1747,9 +1964,9 @@ const Dashboard = () => {
                     <XAxis dataKey="date" hide />
                     <YAxis type="number" domain={['auto', 'auto']} tick={{ fontSize: 10, fill: '#475569' }} width={60} tickLine={false} axisLine={false} />
                     <Tooltip contentStyle={{ backgroundColor: '#020617', border: '1px solid #ffffff10', borderRadius: '12px' }} itemStyle={{ fontSize: '12px', padding: 0 }} />
-                    <Bar dataKey="osc" barSize={3}>
+                    <Bar dataKey="osc" maxBarSize={12}>
                       {(computedKline || []).map((entry, index) => (
-                        <Cell key={`macd-${index}`} fill={(entry.osc || 0) >= 0 ? '#ef4444' : '#22c55e'} opacity={0.8} />
+                        <Cell key={`macd-${index}`} fill={(entry.osc || 0) >= 0 ? '#f43f5e' : '#10b981'} opacity={0.9} />
                       ))}
                     </Bar>
                     <Line type="monotone" dataKey="dif" stroke="#3b82f6" strokeWidth={1.2} dot={false} />
@@ -1760,7 +1977,13 @@ const Dashboard = () => {
 
               {/* RSI Chart */}
               <div className="w-full h-[120px] mt-2 border-t border-white/5 pt-2">
-                <div className="text-[9px] font-bold text-slate-500 mb-1 px-10">RSI (14)</div>
+                <div className="text-[9px] font-bold text-slate-500 mb-1 px-10 flex justify-between items-center">
+                  <span>RSI (14) {hoverPoint ? <span className="text-slate-400 font-normal">| {hoverPoint.date}</span> : ''}</span>
+                  <span className="text-[#ec4899] font-black tracking-tight text-[11px]">
+                    {hoverPoint ? 'RSI: ' : 'LATEST: '} 
+                    {(hoverPoint?.rsi ?? computedKline?.[computedKline.length - 1]?.rsi)?.toFixed(2) || '--'}
+                  </span>
+                </div>
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart 
                     data={computedKline} 
@@ -1771,9 +1994,9 @@ const Dashboard = () => {
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                     <XAxis dataKey="date" hide />
-                    <YAxis type="number" domain={[0, 100]} ticks={[30, 70]} tick={{ fontSize: 10, fill: '#475569' }} width={60} tickLine={false} axisLine={false} />
-                    <ReferenceLine y={70} stroke="#f43f5e" strokeDasharray="3 3" strokeOpacity={0.5} />
-                    <ReferenceLine y={30} stroke="#10b981" strokeDasharray="3 3" strokeOpacity={0.5} />
+                    <YAxis type="number" domain={[0, 100]} ticks={[20, 80]} tick={{ fontSize: 10, fill: '#475569' }} width={60} tickLine={false} axisLine={false} />
+                    <ReferenceLine y={80} stroke="#f43f5e" strokeDasharray="3 3" strokeOpacity={0.5} />
+                    <ReferenceLine y={20} stroke="#10b981" strokeDasharray="3 3" strokeOpacity={0.5} />
                     <Tooltip 
                       contentStyle={{ backgroundColor: '#020617', border: '1px solid #ffffff10', borderRadius: '12px' }} 
                       itemStyle={{ fontSize: '12px', padding: 0 }}
@@ -1827,15 +2050,16 @@ const Dashboard = () => {
               </div>
 
               {/* Volume Chart */}
-              <div className="w-full h-[120px] mt-2 border-t border-white/5 pt-2">
-                <div className="text-[9px] font-bold text-slate-500 mb-1 px-10 flex justify-between items-center">
-                  <span>成交量 (Volume) {hoverPoint ? <span className="text-slate-400 font-normal">| {hoverPoint.date}</span> : ''}</span>
-                  <span className="text-violet-400 font-black tracking-tight text-[11px]">
-                    {hoverPoint ? 'POINT: ' : 'LATEST: '} 
-                    {(hoverPoint?.volume ?? computedKline?.[computedKline.length - 1]?.volume)?.toLocaleString()}
-                  </span>
+              <div className="w-full h-[180px] mt-2 border-t border-white/5 pt-2">
+                <div className="text-[10px] font-bold text-slate-500 mb-1 px-10 flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex flex-wrap items-center gap-4">
+                    <span className="text-white font-black">成交量: {(hoverPoint?.volume ?? computedKline?.[computedKline.length - 1]?.volume)?.toLocaleString()}</span>
+                    <span className="text-[#fbbf24]">MA5: {(hoverPoint?.ma5Vol ?? computedKline?.[computedKline.length - 1]?.ma5Vol)?.toLocaleString() || '--'}</span>
+                    <span className="text-[#3b82f6]">MA10: {(hoverPoint?.ma10Vol ?? computedKline?.[computedKline.length - 1]?.ma10Vol)?.toLocaleString() || '--'}</span>
+                  </div>
+                  {hoverPoint && <span className="text-slate-400 font-normal">{hoverPoint.date}</span>}
                 </div>
-                <div className="w-full h-[150px]">
+                <div className="w-full h-[140px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart 
                       data={computedKline} 
@@ -1858,55 +2082,119 @@ const Dashboard = () => {
                           return val;
                         }}
                       />
-                      <YAxis 
-                        yAxisId="price" 
-                        orientation="right" 
-                        domain={['auto', 'auto']} 
-                        hide 
-                      />
                       <Tooltip 
                         contentStyle={{ backgroundColor: '#020617', border: '1px solid #ffffff10', borderRadius: '12px' }} 
                         itemStyle={{ fontSize: '12px', padding: 0 }}
-                        formatter={(val, name) => [name === '成交量' ? val?.toLocaleString() : val.toFixed(2), name]}
+                        formatter={(val, name) => [typeof val === 'number' ? val.toLocaleString() : val, name]}
                       />
-                      <Bar dataKey="volume" name="成交量" isAnimationActive={false}>
+                      <Bar dataKey="volume" name="成交量" isAnimationActive={false} maxBarSize={12}>
                         {(computedKline || []).map((entry, index) => (
-                          <Cell key={`vol-${index}`} fill={entry.isUp ? '#f43f5e' : '#10b981'} opacity={0.5} />
+                          <Cell key={`vol-${index}`} fill={entry.isUp ? '#f43f5e' : '#10b981'} opacity={0.9} />
                         ))}
                       </Bar>
                       <Line 
-                        yAxisId="price" 
                         type="monotone" 
-                        dataKey="close" 
-                        name="收盤價" 
-                        stroke="#ffffff" 
+                        dataKey="ma5Vol" 
+                        name="MA5" 
+                        stroke="#fbbf24" 
                         strokeWidth={1.5} 
                         dot={false} 
-                        opacity={0.8}
+                      />
+                      <Line 
+                        type="monotone" 
+                        dataKey="ma10Vol" 
+                        name="MA10" 
+                        stroke="#3b82f6" 
+                        strokeWidth={1.5} 
+                        dot={false} 
                       />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
               </div>
 
-              {/* AI Tech Diagnosis */}
-              <div className="mt-8 p-6 bg-white/[0.03] rounded-[32px] border border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-6">
-                <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                  <BrainCircuit size={14} className="text-violet-500" /> AI Tech Diagnosis
-                </h4>
-                <div className="flex flex-col md:flex-row md:items-center gap-6 flex-wrap">
-                  <IndicatorRow label="MA5 (Short)" val={activeHoverPoint ? activeHoverPoint.ma5 : computedKline?.[computedKline.length - 1]?.ma5} current={activeHoverPoint ? activeHoverPoint.close : stockInfo.currentPrice} color="#92400e" />
-                  <IndicatorRow label="MA20 (Mid)" val={activeHoverPoint ? activeHoverPoint.ma20 : computedKline?.[computedKline.length - 1]?.ma20} current={activeHoverPoint ? activeHoverPoint.close : stockInfo.currentPrice} color="#3b82f6" />
-                  <IndicatorRow label="MA60 (Quarter)" val={activeHoverPoint ? activeHoverPoint.ma60 : computedKline?.[computedKline.length - 1]?.ma60} current={activeHoverPoint ? activeHoverPoint.close : stockInfo.currentPrice} color="#eab308" />
-                  
-                  {/* Volume Summary */}
-                  <div className="flex items-center gap-3">
-                    <div className="w-1.5 h-1.5 rounded-full bg-violet-400" />
-                    <span className="text-[11px] font-bold text-slate-400">VOL</span>
-                    <span className="text-xs font-black text-violet-300">
-                      {(activeHoverPoint?.volume ?? computedKline?.[computedKline.length - 1]?.volume)?.toLocaleString()}
-                    </span>
+              {/* AI 智能技術診斷面板 */}
+              <div className="mt-3 py-3.5 px-6 bg-white/[0.015] rounded-[20px] border border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-violet-500/10 rounded-xl border border-violet-500/20">
+                    <BrainCircuit size={16} className="text-violet-400 animate-pulse" />
                   </div>
+                  <div>
+                    <h4 className="text-xs font-black text-slate-400 uppercase tracking-wider">
+                      AI 智能技術診斷
+                    </h4>
+                    <p className="text-[10px] text-slate-500 font-bold">
+                      {activeHoverPoint ? `懸停日期: ${activeHoverPoint.date}` : `最新日期: ${computedKline?.[computedKline.length - 1]?.date || 'N/A'}`}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
+                  {/* MA5 Deviation */}
+                  {(() => {
+                    const p = activeHoverPoint || computedKline?.[computedKline.length - 1];
+                    if (!p || p.ma5 == null) return null;
+                    const dev = ((p.close - p.ma5) / p.ma5) * 100;
+                    const isUp = dev >= 0;
+                    return (
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[10px] font-bold text-slate-500">MA5 乖離率</span>
+                        <span className={`text-xs font-black ${isUp ? 'text-rose-400' : 'text-emerald-400'}`}>
+                          {isUp ? '+' : ''}{dev.toFixed(2)}%
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  {/* MA20 Deviation */}
+                  {(() => {
+                    const p = activeHoverPoint || computedKline?.[computedKline.length - 1];
+                    if (!p || p.ma20 == null) return null;
+                    const dev = ((p.close - p.ma20) / p.ma20) * 100;
+                    const isUp = dev >= 0;
+                    return (
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[10px] font-bold text-slate-500">MA20 乖離率</span>
+                        <span className={`text-xs font-black ${isUp ? 'text-rose-400' : 'text-emerald-400'}`}>
+                          {isUp ? '+' : ''}{dev.toFixed(2)}%
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  {/* MA60 Deviation */}
+                  {(() => {
+                    const p = activeHoverPoint || computedKline?.[computedKline.length - 1];
+                    if (!p || p.ma60 == null) return null;
+                    const dev = ((p.close - p.ma60) / p.ma60) * 100;
+                    const isUp = dev >= 0;
+                    return (
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[10px] font-bold text-slate-500">MA60 乖離率</span>
+                        <span className={`text-xs font-black ${isUp ? 'text-rose-400' : 'text-emerald-400'}`}>
+                          {isUp ? '+' : ''}{dev.toFixed(2)}%
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="w-px h-6 bg-white/10 hidden md:block" />
+
+                  {/* Volume Summary */}
+                  {(() => {
+                    const p = activeHoverPoint || computedKline?.[computedKline.length - 1];
+                    if (!p || p.volume == null) return null;
+                    return (
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[10px] font-bold text-slate-500">當日成交量</span>
+                        <span className="text-xs font-black text-violet-300">
+                          {p.volume.toLocaleString()} <span className="text-[9px] opacity-60">股</span>
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="w-px h-6 bg-white/10 hidden md:block" />
 
                   {/* MACD Diagnosis */}
                   {(() => {
@@ -1916,19 +2204,20 @@ const Dashboard = () => {
                     const k2 = klineArr[idx - 1] || k1;
                     if (!k1?.dif || !k2?.dif) return null;
                     
-                    let msg = "Bearish"; let colorClass = "text-emerald-400"; let dotColor = "#10b981";
-                    if (k1.dif > k1.dem && k2.dif <= k2.dem) { msg = "Golden Cross"; colorClass = "text-rose-400"; dotColor = "#f43f5e"; }
-                    else if (k1.dif < k1.dem && k2.dif >= k2.dem) { msg = "Death Cross"; colorClass = "text-emerald-400"; dotColor = "#10b981"; }
-                    else if (k1.dif > k1.dem) { msg = "Bullish Track"; colorClass = "text-rose-400/80"; dotColor = "#f43f5e"; }
+                    let msg = "空頭走勢"; let colorClass = "text-emerald-400";
+                    if (k1.dif > k1.dem && k2.dif <= k2.dem) { msg = "黃金交叉"; colorClass = "text-rose-400 font-extrabold"; }
+                    else if (k1.dif < k1.dem && k2.dif >= k2.dem) { msg = "死亡交叉"; colorClass = "text-emerald-400 font-extrabold"; }
+                    else if (k1.dif > k1.dem) { msg = "多頭走勢"; colorClass = "text-rose-400/80"; }
 
                     return (
-                      <div className="flex items-center gap-3">
-                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: dotColor }} />
-                        <span className="text-[11px] font-bold text-slate-400">MACD</span>
-                        <span className={`text-xs w-24 font-black ${colorClass}`}>{msg}</span>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[10px] font-bold text-slate-500">MACD 診斷</span>
+                        <span className={`text-xs font-black ${colorClass}`}>{msg}</span>
                       </div>
                     );
                   })()}
+
+                  <div className="w-px h-6 bg-white/10 hidden md:block" />
 
                   {/* RSI Diagnosis */}
                   {(() => {
@@ -1937,21 +2226,23 @@ const Dashboard = () => {
                     const rsi = p?.rsi;
                     if (rsi == null) return null;
                     
-                    let msg = `Weak (${rsi})`; let colorClass = "text-emerald-400/80"; let dotColor = "#10b981";
-                    if (rsi >= 70) { msg = `Overbought (${rsi})`; colorClass = "text-rose-400"; dotColor = "#f43f5e"; }
-                    else if (rsi <= 30) { msg = `Oversold (${rsi})`; colorClass = "text-emerald-400"; dotColor = "#10b981"; }
-                    else if (rsi > 50) { msg = `Strong (${rsi})`; colorClass = "text-rose-400/80"; dotColor = "#f43f5e"; }
+                    let msg = `弱勢 (${rsi.toFixed(2)})`; let colorClass = "text-emerald-400/80";
+                    if (rsi >= 80) { msg = `極度超買 (${rsi.toFixed(2)})`; colorClass = "text-rose-500 font-extrabold"; }
+                    else if (rsi >= 70) { msg = `超買過熱 (${rsi.toFixed(2)})`; colorClass = "text-rose-400"; }
+                    else if (rsi <= 20) { msg = `極度超賣 (${rsi.toFixed(2)})`; colorClass = "text-emerald-500 font-extrabold"; }
+                    else if (rsi <= 30) { msg = `超賣低估 (${rsi.toFixed(2)})`; colorClass = "text-emerald-400"; }
+                    else if (rsi > 50) { msg = `強勢 (${rsi.toFixed(2)})`; colorClass = "text-rose-400/80"; }
 
                     return (
-                      <div className="flex items-center gap-3">
-                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: dotColor }} />
-                        <span className="text-[11px] font-bold text-slate-400">RSI</span>
-                        <span className={`text-xs w-28 font-black ${colorClass}`}>{msg}</span>
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[10px] font-bold text-slate-500">RSI 評估</span>
+                        <span className={`text-xs font-black ${colorClass}`}>{msg}</span>
                       </div>
                     );
                   })()}
                 </div>
               </div>
+
             </GlassCard>
 
           </motion.div>
