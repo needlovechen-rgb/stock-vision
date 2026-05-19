@@ -634,8 +634,8 @@ const Dashboard = () => {
   useEffect(() => {
     const fetchQuality = async () => {
       const lastFetch = localStorage.getItem('quality_stocks_last_fetch');
-      // 6 小時內更新過且已有資料則跳過
-      if (lastFetch && (Date.now() - parseInt(lastFetch) < 21600000) && qualityStocks.length >= 10) return;
+      // 1 週內更新過且已有資料則跳過 (7 天 = 604800000 毫秒)
+      if (lastFetch && (Date.now() - parseInt(lastFetch) < 604800000) && qualityStocks.length >= 10) return;
 
       const candidates = [
         '2812.TW', '1101.TW', '2002.TW', '2330.TW', '2317.TW', 
