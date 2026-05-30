@@ -6,7 +6,8 @@ import {
 import { 
   Search, TrendingUp, TrendingDown, Shield, HelpCircle, Activity, BrainCircuit, 
   Calculator, Settings2, RefreshCw, Globe, Waves, Trash2, LineChart as LineChartIcon,
-  ChevronRight, AlertTriangle, Target, Link2, Check
+  ChevronRight, AlertTriangle, Target, Link2, Check, Smartphone, Cloud, Share2,
+  UploadCloud, DownloadCloud, X, Database
 } from 'lucide-react';
 import { calculateValuation } from '../utils/valuation';
 import { 
@@ -97,7 +98,26 @@ const translations = {
     quality_picks: "優質精選",
     quality_desc: "(P<BV 或 五年EPS>0 或 PE<20)",
     copy_sync_link: "複製同步連結",
-    link_copied: "已複製！"
+    link_copied: "已複製！",
+    sync_center: "跨裝置同步中心",
+    sync_desc: "在您的手機或其他裝置之間快速同步最近查詢歷史",
+    qr_sync: "QR Code 掃描同步",
+    qr_sync_desc: "使用另一台裝置（如手機）掃描下方條碼即可立刻同步，會自動提供合併選項！",
+    cloud_sync: "雲端同步碼",
+    cloud_sync_desc: "使用免註冊雲端同步碼，免登入、跨設備極速對接",
+    get_sync_code: "產生同步金鑰",
+    enter_sync_code: "輸入他端同步碼",
+    sync_btn: "確認同步",
+    sync_code_label: "您的專屬同步碼 (5分鐘內有效)",
+    sync_success: "同步成功！已載入全新紀錄",
+    sync_failed: "同步失敗，請檢查網路或同步碼是否正確",
+    sync_uploading: "正在上傳至雲端...",
+    sync_downloading: "正在從雲端載入...",
+    merge_title: "發現來自其他裝置的查詢紀錄",
+    merge_sub: "是否要與本機現有的查詢紀錄進行合併？",
+    merge_btn: "合併兩端紀錄",
+    overwrite_btn: "覆蓋本機紀錄",
+    cancel_merge: "保留本機不變"
   },
   en: {
     syncing: "Syncing global markets...",
@@ -174,8 +194,29 @@ const translations = {
     overheated: "Overheated/Full Exit",
     below: "Below",
     above: "Above",
+    quality_picks: "Quality Picks",
+    quality_desc: "(P<BV or 5Y EPS>0 or PE<20)",
     copy_sync_link: "Copy Sync Link",
-    link_copied: "Copied!"
+    link_copied: "Copied!",
+    sync_center: "Cross-Device Sync Center",
+    sync_desc: "Quickly sync your search history across phones and computers",
+    qr_sync: "QR Code Scan Sync",
+    qr_sync_desc: "Scan the QR code below with another device to sync and get merge options!",
+    cloud_sync: "Cloud Sync Key",
+    cloud_sync_desc: "No registration required, sync across devices via custom temporary codes",
+    get_sync_code: "Generate Sync Key",
+    enter_sync_code: "Enter Sync Key",
+    sync_btn: "Sync Now",
+    sync_code_label: "Your Sync Key (Active for 5 minutes)",
+    sync_success: "Sync successful! Loaded new history",
+    sync_failed: "Sync failed, please check connection or sync key",
+    sync_uploading: "Uploading to cloud...",
+    sync_downloading: "Downloading from cloud...",
+    merge_title: "Incoming History Detected",
+    merge_sub: "Would you like to merge this with your local search history?",
+    merge_btn: "Merge Records",
+    overwrite_btn: "Overwrite Local",
+    cancel_merge: "Keep Local Only"
   }
 };
 
@@ -205,6 +246,59 @@ const buildHashString = (history) => {
     return name ? `${sym}:${name}` : sym;
   }).join(',');
   return `#h=${encoded}`;
+};
+
+// =============================================
+// Cloud Sync Helper
+// =============================================
+
+const cloudSync = {
+  // 隨機生成 6 碼大寫英數同步碼
+  generateCode() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
+  },
+  
+  // 上傳最近查詢歷史
+  async upload(code, history) {
+    try {
+      const response = await fetch(`https://api.keyvalue.xyz/key/sv_hist_v1_${code}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(history)
+      });
+      if (!response.ok) throw new Error('上傳失敗');
+      return true;
+    } catch (e) {
+      console.error("Cloud sync upload error:", e);
+      throw e;
+    }
+  },
+  
+  // 下載最近查詢歷史
+  async download(code) {
+    try {
+      const response = await fetch(`https://api.keyvalue.xyz/key/sv_hist_v1_${code}`);
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error('找不到此同步碼，請確認是否輸入正確或已過期。');
+        }
+        throw new Error('下載失敗');
+      }
+      const data = await response.json();
+      if (!Array.isArray(data)) throw new Error('資料格式不正確');
+      return data;
+    } catch (e) {
+      console.error("Cloud sync download error:", e);
+      throw e;
+    }
+  }
 };
 
 
@@ -624,11 +718,19 @@ const Dashboard = () => {
   const [kdPeriod, setKdPeriod] = useState(9);
   const [macdConfig, setMacdConfig] = useState({ fast: 12, slow: 26, signal: 9 });
   const [searchHistory, setSearchHistory] = useState(() => {
-    const fromHash = parseHashHistory();
-    if (fromHash.length > 0) return fromHash;
     const saved = localStorage.getItem('stock_search_history');
     return saved ? JSON.parse(saved) : [];
   });
+
+  // 同步中心相關 State
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  
+  // 雲端同步相關 State
+  const [syncCode, setSyncCode] = useState('');
+  const [inputSyncCode, setInputSyncCode] = useState('');
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncStatusMsg, setSyncStatusMsg] = useState('');
+
   const [linkCopied, setLinkCopied] = useState(false);
   const [lang, setLang] = useState(() => localStorage.getItem('stock_vision_lang') || 'zh');
   const [qualityStocks, setQualityStocks] = useState(() => {
@@ -663,6 +765,34 @@ const Dashboard = () => {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
   }, [searchHistory]);
+
+  // 檢查 URL Hash 並自動與本機歷史進行默默合併 (無需確認)
+  useEffect(() => {
+    const fromHash = parseHashHistory();
+    if (fromHash.length > 0) {
+      setSearchHistory(prev => {
+        const mergedMap = new Map();
+        // 外來的排前面
+        fromHash.forEach(h => {
+          const sym = typeof h === 'string' ? h : h.symbol;
+          const name = typeof h === 'string' ? '' : h.name;
+          mergedMap.set(sym, name);
+        });
+        // 本地的補在後面
+        prev.forEach(h => {
+          const sym = typeof h === 'string' ? h : h.symbol;
+          const name = typeof h === 'string' ? '' : h.name;
+          if (!mergedMap.has(sym)) {
+            mergedMap.set(sym, name);
+          }
+        });
+        const merged = Array.from(mergedMap.entries()).map(([symbol, name]) => ({ symbol, name }));
+        return merged.slice(0, 20);
+      });
+      // 默默清除 URL hash
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, []); // 僅在初次掛載時執行
 
   // Sync quality stocks to localStorage
   useEffect(() => {
@@ -760,6 +890,62 @@ const Dashboard = () => {
       setLoading(false);
     }
   }, [assumptions]);
+
+  const handleGenerateCloudCode = useCallback(async () => {
+    setSyncLoading(true);
+    setSyncStatusMsg(t('sync_uploading'));
+    try {
+      const code = cloudSync.generateCode();
+      await cloudSync.upload(code, searchHistory);
+      setSyncCode(code);
+      setSyncStatusMsg('');
+    } catch (e) {
+      setSyncStatusMsg(t('sync_failed'));
+    } finally {
+      setSyncLoading(false);
+    }
+  }, [searchHistory, t]);
+
+  const handleApplyCloudCode = useCallback(async () => {
+    const code = inputSyncCode.trim().toUpperCase();
+    if (!code) return;
+    setSyncLoading(true);
+    setSyncStatusMsg(t('sync_downloading'));
+    try {
+      const data = await cloudSync.download(code);
+      if (Array.isArray(data)) {
+        setSearchHistory(prev => {
+          const mergedMap = new Map();
+          // 外來下載的排前面
+          data.forEach(h => {
+            const sym = typeof h === 'string' ? h : h.symbol;
+            const name = typeof h === 'string' ? '' : h.name;
+            mergedMap.set(sym, name);
+          });
+          // 本地的補在後面
+          prev.forEach(h => {
+            const sym = typeof h === 'string' ? h : h.symbol;
+            const name = typeof h === 'string' ? '' : h.name;
+            if (!mergedMap.has(sym)) {
+              mergedMap.set(sym, name);
+            }
+          });
+          const merged = Array.from(mergedMap.entries()).map(([symbol, name]) => ({ symbol, name }));
+          return merged.slice(0, 20);
+        });
+        setSyncStatusMsg(t('sync_success'));
+        setInputSyncCode('');
+        setTimeout(() => {
+          setShowSyncModal(false);
+          setSyncStatusMsg('');
+        }, 1500);
+      }
+    } catch (e) {
+      setSyncStatusMsg(t('sync_failed'));
+    } finally {
+      setSyncLoading(false);
+    }
+  }, [inputSyncCode, t]);
 
   const valuationData = useMemo(() => {
     if (!stockInfo?.valuation) return null;
@@ -1099,6 +1285,14 @@ const Dashboard = () => {
                 )}
               </div>
             )})}
+            <button
+              onClick={() => setShowSyncModal(true)}
+              className="flex items-center gap-1 px-2 py-1.5 text-slate-600 hover:text-violet-400 text-[10px] uppercase font-black transition-colors active:scale-95"
+              title={t('sync_center')}
+            >
+              <Smartphone size={12} className="animate-pulse" />
+              <span>{t('sync_center')}</span>
+            </button>
             <button
               onClick={() => {
                 const url = window.location.href;
@@ -2302,6 +2496,127 @@ const Dashboard = () => {
             </GlassCard>
 
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Sync Center Modal */}
+      <AnimatePresence>
+        {showSyncModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#020617]/85 backdrop-blur-md">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="w-full max-w-lg bg-slate-900 border border-white/10 rounded-[32px] overflow-hidden shadow-2xl shadow-violet-900/20"
+            >
+              {/* Header */}
+              <div className="p-6 border-b border-white/5 flex items-center justify-between bg-gradient-to-r from-violet-600/10 to-indigo-600/10">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-violet-500/20 rounded-xl text-violet-400">
+                    <Smartphone size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-slate-200">{t('sync_center')}</h3>
+                    <p className="text-xs text-slate-500 font-bold">{t('sync_desc')}</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    setShowSyncModal(false);
+                    setSyncStatusMsg('');
+                    setSyncCode('');
+                  }} 
+                  className="p-1.5 hover:bg-white/5 rounded-full text-slate-400 hover:text-white transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-6 space-y-6">
+                
+                {/* QR Code Section */}
+                <div className="bg-white/[0.02] border border-white/5 p-5 rounded-2xl flex flex-col sm:flex-row items-center gap-6">
+                  <div className="bg-white p-3 rounded-2xl shadow-lg border border-violet-500/20 shrink-0">
+                    <img 
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(window.location.href)}&color=020617`} 
+                      alt="Sync QR Code"
+                      className="w-[120px] h-[120px]"
+                    />
+                  </div>
+                  <div className="space-y-2 text-center sm:text-left">
+                    <h4 className="text-xs font-black uppercase text-violet-400 tracking-wider flex items-center gap-1.5 justify-center sm:justify-start">
+                      <Share2 size={12} /> {t('qr_sync')}
+                    </h4>
+                    <p className="text-xs text-slate-400 leading-relaxed font-bold">
+                      {t('qr_sync_desc')}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Cloud Sync Section */}
+                <div className="bg-white/[0.02] border border-white/5 p-5 rounded-2xl space-y-4">
+                  <h4 className="text-xs font-black uppercase text-violet-400 tracking-wider flex items-center gap-1.5">
+                    <Cloud size={12} /> {t('cloud_sync')}
+                  </h4>
+                  <p className="text-xs text-slate-400 leading-relaxed font-bold">
+                    {t('cloud_sync_desc')}
+                  </p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                    {/* Generate Code */}
+                    <div className="space-y-2">
+                      <button
+                        onClick={handleGenerateCloudCode}
+                        disabled={syncLoading}
+                        className="w-full py-2.5 bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800/50 rounded-xl text-xs font-black transition-colors flex items-center justify-center gap-2 active:scale-[0.98]"
+                      >
+                        <UploadCloud size={14} />
+                        {t('get_sync_code')}
+                      </button>
+                      
+                      {syncCode && (
+                        <div className="text-center p-2 bg-violet-500/10 border border-violet-500/20 rounded-xl">
+                          <span className="text-[10px] text-slate-500 font-bold uppercase block">{t('sync_code_label')}</span>
+                          <span className="text-xl font-black text-violet-400 tracking-widest">{syncCode}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Apply Code */}
+                    <div className="space-y-2">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          maxLength={6}
+                          placeholder="EX: A7B9C3"
+                          value={inputSyncCode}
+                          onChange={(e) => setInputSyncCode(e.target.value.toUpperCase())}
+                          className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-xs font-bold text-center text-white placeholder-slate-600 focus:outline-none focus:border-violet-500 tracking-wider"
+                        />
+                        <button
+                          onClick={handleApplyCloudCode}
+                          disabled={syncLoading || inputSyncCode.length < 6}
+                          className="px-4 py-2 bg-white/10 hover:bg-white/20 disabled:bg-white/5 disabled:text-slate-600 rounded-xl text-xs font-black transition-colors flex items-center justify-center gap-1.5 active:scale-[0.98]"
+                        >
+                          <DownloadCloud size={14} />
+                          {t('sync_btn')}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {syncStatusMsg && (
+                    <div className="text-center text-xs font-bold text-slate-400 pt-2 animate-pulse">
+                      {syncStatusMsg}
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>
