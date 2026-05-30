@@ -3,7 +3,7 @@
  */
 
 const RETRY_LIMIT = 2;
-const FETCH_TIMEOUT = 12000;
+const FETCH_TIMEOUT = 7000;
 const MEMORY_CACHE = new Map();
 const CACHE_DURATION = 5 * 60 * 1000;
 
@@ -163,7 +163,7 @@ function savePersistentHistory(symbol, data) {
 const to2 = (val) => typeof val === 'number' ? Number(val.toFixed(2)) : null;
 
 // Technical Indicators Calculation
-const calculateMA = (data, p) => {
+export const calculateMA = (data, p) => {
   const result = new Array(data.length).fill(null);
   let sum = 0;
   for (let i = 0; i < data.length; i++) {

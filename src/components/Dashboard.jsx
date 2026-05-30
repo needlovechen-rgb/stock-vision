@@ -6,11 +6,11 @@ import {
 import { 
   Search, TrendingUp, TrendingDown, Shield, HelpCircle, Activity, BrainCircuit, 
   Calculator, Settings2, RefreshCw, Globe, Waves, Trash2, LineChart as LineChartIcon,
-  ChevronRight, AlertTriangle, Target
+  ChevronRight, AlertTriangle, Target, Link2, Check
 } from 'lucide-react';
 import { calculateValuation } from '../utils/valuation';
 import { 
-  fetchStockData, calculateKD, calculateMACD
+  fetchStockData, calculateKD, calculateMACD, calculateMA
 } from '../utils/stockDataService';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -95,7 +95,9 @@ const translations = {
     below: "以下",
     above: "以上",
     quality_picks: "優質精選",
-    quality_desc: "(P<BV 或 五年EPS>0 或 PE<20)"
+    quality_desc: "(P<BV 或 五年EPS>0 或 PE<20)",
+    copy_sync_link: "複製同步連結",
+    link_copied: "已複製！"
   },
   en: {
     syncing: "Syncing global markets...",
@@ -171,8 +173,38 @@ const translations = {
     exit_logic: "Start Reducing",
     overheated: "Overheated/Full Exit",
     below: "Below",
-    above: "Above"
+    above: "Above",
+    copy_sync_link: "Copy Sync Link",
+    link_copied: "Copied!"
   }
+};
+
+// =============================================
+// URL Hash Sync Helpers
+// =============================================
+
+const parseHashHistory = () => {
+  try {
+    const hash = window.location.hash.slice(1);
+    if (!hash) return [];
+    const params = new URLSearchParams(hash);
+    const raw = params.get('h');
+    if (!raw) return [];
+    return raw.split(',').filter(Boolean).map(entry => {
+      const [symbol, ...nameParts] = entry.split(':');
+      return { symbol, name: nameParts.join(':') || '' };
+    });
+  } catch { return []; }
+};
+
+const buildHashString = (history) => {
+  if (!history.length) return '';
+  const encoded = history.map(h => {
+    const sym = typeof h === 'string' ? h : h.symbol;
+    const name = typeof h === 'string' ? '' : (h.name || '');
+    return name ? `${sym}:${name}` : sym;
+  }).join(',');
+  return `#h=${encoded}`;
 };
 
 
@@ -592,9 +624,12 @@ const Dashboard = () => {
   const [kdPeriod, setKdPeriod] = useState(9);
   const [macdConfig, setMacdConfig] = useState({ fast: 12, slow: 26, signal: 9 });
   const [searchHistory, setSearchHistory] = useState(() => {
+    const fromHash = parseHashHistory();
+    if (fromHash.length > 0) return fromHash;
     const saved = localStorage.getItem('stock_search_history');
     return saved ? JSON.parse(saved) : [];
   });
+  const [linkCopied, setLinkCopied] = useState(false);
   const [lang, setLang] = useState(() => localStorage.getItem('stock_vision_lang') || 'zh');
   const [qualityStocks, setQualityStocks] = useState(() => {
     const saved = localStorage.getItem('quality_stocks_cache');
@@ -618,9 +653,15 @@ const Dashboard = () => {
   }, [lang]);
 
 
-  // Sync history to localStorage
+  // Sync history to localStorage + URL hash
   useEffect(() => {
     localStorage.setItem('stock_search_history', JSON.stringify(searchHistory));
+    const newHash = buildHashString(searchHistory);
+    if (newHash) {
+      window.history.replaceState(null, '', newHash);
+    } else {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
   }, [searchHistory]);
 
   // Sync quality stocks to localStorage
@@ -740,22 +781,12 @@ const Dashboard = () => {
     const macd = calculateMACD(closes, macdConfig.fast, macdConfig.slow, macdConfig.signal);
     
     // Calculate MA120 for long-term trend
-    const calculateMAHelper = (data, p) => {
-      const result = new Array(data.length).fill(null);
-      let sum = 0;
-      for (let i = 0; i < data.length; i++) {
-        sum += (data[i] || 0);
-        if (i >= p) sum -= (data[i - p] || 0);
-        if (i >= p - 1) result[i] = sum / p;
-      }
-      return result;
-    };
-    const ma120 = calculateMAHelper(closes, 120);
+    const ma120 = calculateMA(closes, 120);
 
     // Calculate Volume MAs matching the photo
     const volumes = stockInfo.kline.map(d => d.volume || 0);
-    const ma5Vol = calculateMAHelper(volumes, 5);
-    const ma10Vol = calculateMAHelper(volumes, 10);
+    const ma5Vol = calculateMA(volumes, 5);
+    const ma10Vol = calculateMA(volumes, 10);
 
     return stockInfo.kline.map((d, i) => ({
       ...d,
@@ -775,6 +806,82 @@ const Dashboard = () => {
     if (!hoverPoint || !computedKline) return null;
     return computedKline.find(k => k.date === hoverPoint.date);
   }, [hoverPoint, computedKline]);
+
+  const activePoint = useMemo(() => {
+    if (!computedKline || computedKline.length === 0) return null;
+    return activeHoverPoint || computedKline[computedKline.length - 1];
+  }, [activeHoverPoint, computedKline]);
+
+  const aiDiagnosis = useMemo(() => {
+    if (!activePoint || !computedKline || computedKline.length === 0) return null;
+
+    const p = activePoint;
+    const klineArr = computedKline;
+    const idx = klineArr.findIndex(k => k.date === p.date);
+    const prevPoint = idx > 0 ? klineArr[idx - 1] : p;
+
+    // 1. MA Deviations
+    const ma5Dev = p.ma5 ? ((p.close - p.ma5) / p.ma5) * 100 : null;
+    const ma20Dev = p.ma20 ? ((p.close - p.ma20) / p.ma20) * 100 : null;
+    const ma60Dev = p.ma60 ? ((p.close - p.ma60) / p.ma60) * 100 : null;
+
+    // 2. MACD Diagnosis
+    let macdMsg = "空頭走勢";
+    let macdColor = "text-emerald-400";
+    if (p.dif !== null && p.dem !== null && prevPoint.dif !== null && prevPoint.dem !== null) {
+      if (prevPoint.dif < prevPoint.dem && p.dif > p.dem) {
+        macdMsg = "黃金交叉";
+        macdColor = "text-rose-400 font-extrabold";
+      } else if (prevPoint.dif > prevPoint.dem && p.dif < p.dem) {
+        macdMsg = "死亡交叉";
+        macdColor = "text-emerald-400 font-extrabold";
+      } else if (p.dif > p.dem) {
+        macdMsg = "多頭走勢";
+        macdColor = "text-rose-400/80";
+      }
+    } else {
+      macdMsg = "無信號";
+      macdColor = "text-slate-500";
+    }
+
+    // 3. RSI Diagnosis
+    let rsiMsg = "偏弱";
+    let rsiColor = "text-emerald-400/80";
+    const rsi = p.rsi;
+    if (rsi != null) {
+      if (rsi >= 80) { rsiMsg = "極度超買"; rsiColor = "text-rose-500 font-extrabold"; }
+      else if (rsi >= 70) { rsiMsg = "超買過熱"; rsiColor = "text-rose-400"; }
+      else if (rsi <= 20) { rsiMsg = "極度超賣"; rsiColor = "text-emerald-500 font-extrabold"; }
+      else if (rsi <= 30) { rsiMsg = "超賣低估"; rsiColor = "text-emerald-400"; }
+      else if (rsi > 50) { rsiMsg = "強勢"; rsiColor = "text-rose-400/80"; }
+    } else {
+      rsiMsg = "無指標";
+      rsiColor = "text-slate-500";
+    }
+
+    return {
+      ma5Dev,
+      ma20Dev,
+      ma60Dev,
+      macdMsg,
+      macdColor,
+      rsiMsg,
+      rsiColor,
+      volume: p.volume
+    };
+  }, [activePoint, computedKline]);
+
+  const roeData = useMemo(() => {
+    if (!stockInfo?.yearlyStats) return [];
+    return stockInfo.yearlyStats
+      .slice(0, 5)
+      .map(y => ({
+        year: y.year,
+        eps: y.totalEps,
+        roe: y.bvps > 0 ? parseFloat(((y.totalEps / y.bvps) * 100).toFixed(2)) : 0
+      }))
+      .reverse();
+  }, [stockInfo]);
 
   // Valuation Signal & KD Signal Analysis
   const analysisSignals = useMemo(() => {
@@ -853,8 +960,9 @@ const Dashboard = () => {
   const premiumInfo = useMemo(() => {
     if (!stockInfo || !stockInfo.realtime) return null;
     
-    // 取得開盤價 (優先使用即時開盤，若為 0 則使用現價作為保險)
-    const open = stockInfo.realtime.open || stockInfo.currentPrice;
+    // 取得開盤價 (優先使用即時開盤，若為 0 則退而求其次使用 intraday 第一筆，最後才用現價)
+    const intradayOpen = stockInfo.intraday && stockInfo.intraday.length > 0 ? stockInfo.intraday[0].price : null;
+    const open = stockInfo.realtime.open || intradayOpen || stockInfo.currentPrice;
     // 取得昨日收盤價 (優先使用 API 欄位，若無則透過現價與漲跌反推)
     const prevClose = stockInfo.realtime.prevClose || (stockInfo.currentPrice - (stockInfo.realtime.change || 0));
     
@@ -991,6 +1099,20 @@ const Dashboard = () => {
                 )}
               </div>
             )})}
+            <button
+              onClick={() => {
+                const url = window.location.href;
+                navigator.clipboard.writeText(url).then(() => {
+                  setLinkCopied(true);
+                  setTimeout(() => setLinkCopied(false), 2000);
+                });
+              }}
+              className="flex items-center gap-1 px-2 py-1.5 text-slate-600 hover:text-violet-400 text-[10px] uppercase font-black transition-colors"
+              title={t('copy_sync_link')}
+            >
+              {linkCopied ? <Check size={12} className="text-emerald-400" /> : <Link2 size={12} />}
+              {linkCopied && <span className="text-emerald-400 text-[9px]">{t('link_copied')}</span>}
+            </button>
             <button 
               onClick={() => setSearchHistory([])}
               className="px-2 py-1.5 text-slate-600 hover:text-rose-400 text-[10px] uppercase font-black transition-colors"
@@ -1145,7 +1267,7 @@ const Dashboard = () => {
                         <>
                           <div className="w-px h-4 bg-white/10 mx-1" />
                           <div className={`flex items-center gap-3 font-black text-xl ${premiumInfo.colorClass}`}>
-                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">開盤議價:</span>
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">開盤溢價率:</span>
                             <span>{premiumInfo.rate >= 0 ? '+' : ''}{premiumInfo.rate.toFixed(1)}%</span>
                             <span className="opacity-60">|</span>
                             <span>{premiumInfo.interpretation}</span>
@@ -1458,7 +1580,7 @@ const Dashboard = () => {
               </div>
               <div className="w-full h-[200px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={stockInfo.yearlyStats.slice(0, 5).map(y => ({ year: y.year, eps: y.totalEps, roe: y.bvps > 0 ? parseFloat(((y.totalEps / y.bvps) * 100).toFixed(2)) : 0 })).reverse()}>
+                  <BarChart data={roeData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                     <XAxis dataKey="year" tick={{ fontSize: 10, fill: '#475569' }} tickLine={false} axisLine={false} />
                     <YAxis type="number" tick={{ fontSize: 10, fill: '#475569' }} tickLine={false} axisLine={false} width={45} tickFormatter={(val) => `${val}%`} />
@@ -1477,7 +1599,7 @@ const Dashboard = () => {
                       }}
                     />
                     <Bar dataKey="roe" name="ROE" radius={[4, 4, 0, 0]}>
-                      {stockInfo.yearlyStats.slice(0, 5).map(y => ({ year: y.year, eps: y.totalEps, roe: y.bvps > 0 ? parseFloat(((y.totalEps / y.bvps) * 100).toFixed(2)) : 0 })).reverse().map((entry, index) => (
+                      {roeData.map((entry, index) => (
                         <Cell key={`roe-${index}`} fill={entry.roe > 15 ? '#f97316' : entry.roe > 0 ? '#fbbf24' : '#64748b'} />
                       ))}
                     </Bar>
@@ -1788,95 +1910,52 @@ const Dashboard = () => {
                     </div>
 
                     {/* Row 2: AI Tech Diagnosis (MA Deviations, MACD, RSI) */}
-                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px] font-bold border-t border-white/5 pt-3">
-                      <span className="text-violet-400 font-black flex items-center gap-1.5 mr-2">
-                        <BrainCircuit size={13} className="animate-pulse" /> AI 智能指標診斷:
-                      </span>
-                      
-                      {/* MA5 Deviation */}
-                      {(() => {
-                        const ma5Val = point.ma5;
-                        if (ma5Val == null) return null;
-                        const diff = ((point.close - ma5Val) / ma5Val) * 100;
-                        return (
+                    {aiDiagnosis && (
+                      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px] font-bold border-t border-white/5 pt-3">
+                        <span className="text-violet-400 font-black flex items-center gap-1.5 mr-2">
+                          <BrainCircuit size={13} className="animate-pulse" /> AI 智能指標診斷:
+                        </span>
+                        
+                        {aiDiagnosis.ma5Dev !== null && (
                           <div className="flex items-center gap-1.5">
                             <span className="text-slate-500">MA5 乖離率:</span>
-                            <span className={`font-black ${diff >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                              {diff >= 0 ? '+' : ''}{diff.toFixed(2)}%
+                            <span className={`font-black ${aiDiagnosis.ma5Dev >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                              {aiDiagnosis.ma5Dev >= 0 ? '+' : ''}{aiDiagnosis.ma5Dev.toFixed(2)}%
                             </span>
                           </div>
-                        );
-                      })()}
+                        )}
 
-                      {/* MA20 Deviation */}
-                      {(() => {
-                        const ma20Val = point.ma20;
-                        if (ma20Val == null) return null;
-                        const diff = ((point.close - ma20Val) / ma20Val) * 100;
-                        return (
+                        {aiDiagnosis.ma20Dev !== null && (
                           <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
                             <span className="text-slate-500">MA20 乖離率:</span>
-                            <span className={`font-black ${diff >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                              {diff >= 0 ? '+' : ''}{diff.toFixed(2)}%
+                            <span className={`font-black ${aiDiagnosis.ma20Dev >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                              {aiDiagnosis.ma20Dev >= 0 ? '+' : ''}{aiDiagnosis.ma20Dev.toFixed(2)}%
                             </span>
                           </div>
-                        );
-                      })()}
+                        )}
 
-                      {/* MA60 Deviation */}
-                      {(() => {
-                        const ma60Val = point.ma60;
-                        if (ma60Val == null) return null;
-                        const diff = ((point.close - ma60Val) / ma60Val) * 100;
-                        return (
+                        {aiDiagnosis.ma60Dev !== null && (
                           <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
                             <span className="text-slate-500">MA60 乖離率:</span>
-                            <span className={`font-black ${diff >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                              {diff >= 0 ? '+' : ''}{diff.toFixed(2)}%
+                            <span className={`font-black ${aiDiagnosis.ma60Dev >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                              {aiDiagnosis.ma60Dev >= 0 ? '+' : ''}{aiDiagnosis.ma60Dev.toFixed(2)}%
                             </span>
                           </div>
-                        );
-                      })()}
+                        )}
 
-                      {/* MACD Signal */}
-                      {(() => {
-                        const klineArr = computedKline || [];
-                        const idx = klineArr.findIndex(k => k.date === point.date);
-                        const k1 = point;
-                        const k2 = klineArr[idx - 1] || k1;
-                        if (!k1?.dif || !k2?.dif) return null;
-                        
-                        let msg = "空頭走勢"; let colorClass = "text-emerald-400";
-                        if (k1.dif > k1.dem && k2.dif <= k2.dem) { msg = "黃金交叉"; colorClass = "text-rose-400"; }
-                        else if (k1.dif < k1.dem && k2.dif >= k2.dem) { msg = "死亡交叉"; colorClass = "text-emerald-400"; }
-                        else if (k1.dif > k1.dem) { msg = "多頭走勢"; colorClass = "text-rose-400/80"; }
-                        
-                        return (
-                          <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
-                            <span className="text-slate-500">MACD 狀態:</span>
-                            <span className={`font-black ${colorClass}`}>{msg}</span>
-                          </div>
-                        );
-                      })()}
+                        <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
+                          <span className="text-slate-500">MACD 狀態:</span>
+                          <span className={`font-black ${aiDiagnosis.macdColor.replace(' font-extrabold', '')}`}>{aiDiagnosis.macdMsg}</span>
+                        </div>
 
-                      {/* RSI Signal */}
-                      {(() => {
-                        const rsi = point.rsi;
-                        if (rsi == null) return null;
-                        
-                        let msg = `偏弱`; let colorClass = "text-emerald-400/80";
-                        if (rsi >= 80) { msg = `超買過熱`; colorClass = "text-rose-400 font-black"; }
-                        else if (rsi <= 20) { msg = `超賣低估`; colorClass = "text-emerald-400 font-black"; }
-                        else if (rsi > 50) { msg = `偏強`; colorClass = "text-rose-400/80"; }
-                        
-                        return (
+                        {point.rsi != null && (
                           <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
                             <span className="text-slate-500">RSI 指標:</span>
-                            <span className={`font-black ${colorClass}`}>{rsi.toFixed(2)} ({msg})</span>
+                            <span className={`font-black ${aiDiagnosis.rsiColor.replace(' font-extrabold', '')}`}>{point.rsi.toFixed(2)} ({aiDiagnosis.rsiMsg})</span>
                           </div>
-                        );
-                      })()}
-                    </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -2154,116 +2233,69 @@ const Dashboard = () => {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
-                  {/* MA5 Deviation */}
-                  {(() => {
-                    const p = activeHoverPoint || computedKline?.[computedKline.length - 1];
-                    if (!p || p.ma5 == null) return null;
-                    const dev = ((p.close - p.ma5) / p.ma5) * 100;
-                    const isUp = dev >= 0;
-                    return (
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-[10px] font-bold text-slate-500">MA5 乖離率</span>
-                        <span className={`text-xs font-black ${isUp ? 'text-rose-400' : 'text-emerald-400'}`}>
-                          {isUp ? '+' : ''}{dev.toFixed(2)}%
-                        </span>
-                      </div>
-                    );
-                  })()}
+                  {aiDiagnosis && activePoint && (
+                    <>
+                      {/* MA5 Deviation */}
+                      {aiDiagnosis.ma5Dev !== null && (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] font-bold text-slate-500">MA5 乖離率</span>
+                          <span className={`text-xs font-black ${aiDiagnosis.ma5Dev >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                            {aiDiagnosis.ma5Dev >= 0 ? '+' : ''}{aiDiagnosis.ma5Dev.toFixed(2)}%
+                          </span>
+                        </div>
+                      )}
 
-                  {/* MA20 Deviation */}
-                  {(() => {
-                    const p = activeHoverPoint || computedKline?.[computedKline.length - 1];
-                    if (!p || p.ma20 == null) return null;
-                    const dev = ((p.close - p.ma20) / p.ma20) * 100;
-                    const isUp = dev >= 0;
-                    return (
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-[10px] font-bold text-slate-500">MA20 乖離率</span>
-                        <span className={`text-xs font-black ${isUp ? 'text-rose-400' : 'text-emerald-400'}`}>
-                          {isUp ? '+' : ''}{dev.toFixed(2)}%
-                        </span>
-                      </div>
-                    );
-                  })()}
+                      {/* MA20 Deviation */}
+                      {aiDiagnosis.ma20Dev !== null && (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] font-bold text-slate-500">MA20 乖離率</span>
+                          <span className={`text-xs font-black ${aiDiagnosis.ma20Dev >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                            {aiDiagnosis.ma20Dev >= 0 ? '+' : ''}{aiDiagnosis.ma20Dev.toFixed(2)}%
+                          </span>
+                        </div>
+                      )}
 
-                  {/* MA60 Deviation */}
-                  {(() => {
-                    const p = activeHoverPoint || computedKline?.[computedKline.length - 1];
-                    if (!p || p.ma60 == null) return null;
-                    const dev = ((p.close - p.ma60) / p.ma60) * 100;
-                    const isUp = dev >= 0;
-                    return (
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-[10px] font-bold text-slate-500">MA60 乖離率</span>
-                        <span className={`text-xs font-black ${isUp ? 'text-rose-400' : 'text-emerald-400'}`}>
-                          {isUp ? '+' : ''}{dev.toFixed(2)}%
-                        </span>
-                      </div>
-                    );
-                  })()}
+                      {/* MA60 Deviation */}
+                      {aiDiagnosis.ma60Dev !== null && (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] font-bold text-slate-500">MA60 乖離率</span>
+                          <span className={`text-xs font-black ${aiDiagnosis.ma60Dev >= 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                            {aiDiagnosis.ma60Dev >= 0 ? '+' : ''}{aiDiagnosis.ma60Dev.toFixed(2)}%
+                          </span>
+                        </div>
+                      )}
 
-                  <div className="w-px h-6 bg-white/10 hidden md:block" />
+                      <div className="w-px h-6 bg-white/10 hidden md:block" />
 
-                  {/* Volume Summary */}
-                  {(() => {
-                    const p = activeHoverPoint || computedKline?.[computedKline.length - 1];
-                    if (!p || p.volume == null) return null;
-                    return (
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-[10px] font-bold text-slate-500">當日成交量</span>
-                        <span className="text-xs font-black text-violet-300">
-                          {p.volume.toLocaleString()} <span className="text-[9px] opacity-60">股</span>
-                        </span>
-                      </div>
-                    );
-                  })()}
+                      {/* Volume Summary */}
+                      {activePoint.volume != null && (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] font-bold text-slate-500">當日成交量</span>
+                          <span className="text-xs font-black text-violet-300">
+                            {activePoint.volume.toLocaleString()} <span className="text-[9px] opacity-60">股</span>
+                          </span>
+                        </div>
+                      )}
 
-                  <div className="w-px h-6 bg-white/10 hidden md:block" />
+                      <div className="w-px h-6 bg-white/10 hidden md:block" />
 
-                  {/* MACD Diagnosis */}
-                  {(() => {
-                    const klineArr = computedKline || [];
-                    const k1 = activeHoverPoint || klineArr[klineArr.length - 1];
-                    const idx = activeHoverPoint ? klineArr.findIndex(k => k.date === activeHoverPoint.date) : klineArr.length - 1;
-                    const k2 = klineArr[idx - 1] || k1;
-                    if (!k1?.dif || !k2?.dif) return null;
-                    
-                    let msg = "空頭走勢"; let colorClass = "text-emerald-400";
-                    if (k1.dif > k1.dem && k2.dif <= k2.dem) { msg = "黃金交叉"; colorClass = "text-rose-400 font-extrabold"; }
-                    else if (k1.dif < k1.dem && k2.dif >= k2.dem) { msg = "死亡交叉"; colorClass = "text-emerald-400 font-extrabold"; }
-                    else if (k1.dif > k1.dem) { msg = "多頭走勢"; colorClass = "text-rose-400/80"; }
-
-                    return (
+                      {/* MACD Diagnosis */}
                       <div className="flex flex-col gap-0.5">
                         <span className="text-[10px] font-bold text-slate-500">MACD 診斷</span>
-                        <span className={`text-xs font-black ${colorClass}`}>{msg}</span>
+                        <span className={`text-xs font-black ${aiDiagnosis.macdColor}`}>{aiDiagnosis.macdMsg}</span>
                       </div>
-                    );
-                  })()}
 
-                  <div className="w-px h-6 bg-white/10 hidden md:block" />
+                      <div className="w-px h-6 bg-white/10 hidden md:block" />
 
-                  {/* RSI Diagnosis */}
-                  {(() => {
-                    const klineArr = computedKline || [];
-                    const p = activeHoverPoint || klineArr[klineArr.length - 1];
-                    const rsi = p?.rsi;
-                    if (rsi == null) return null;
-                    
-                    let msg = `弱勢 (${rsi.toFixed(2)})`; let colorClass = "text-emerald-400/80";
-                    if (rsi >= 80) { msg = `極度超買 (${rsi.toFixed(2)})`; colorClass = "text-rose-500 font-extrabold"; }
-                    else if (rsi >= 70) { msg = `超買過熱 (${rsi.toFixed(2)})`; colorClass = "text-rose-400"; }
-                    else if (rsi <= 20) { msg = `極度超賣 (${rsi.toFixed(2)})`; colorClass = "text-emerald-500 font-extrabold"; }
-                    else if (rsi <= 30) { msg = `超賣低估 (${rsi.toFixed(2)})`; colorClass = "text-emerald-400"; }
-                    else if (rsi > 50) { msg = `強勢 (${rsi.toFixed(2)})`; colorClass = "text-rose-400/80"; }
-
-                    return (
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-[10px] font-bold text-slate-500">RSI 評估</span>
-                        <span className={`text-xs font-black ${colorClass}`}>{msg}</span>
-                      </div>
-                    );
-                  })()}
+                      {/* RSI Diagnosis */}
+                      {activePoint.rsi != null && (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] font-bold text-slate-500">RSI 評估</span>
+                          <span className={`text-xs font-black ${aiDiagnosis.rsiColor}`}>{aiDiagnosis.rsiMsg} ({activePoint.rsi.toFixed(2)})</span>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
 
