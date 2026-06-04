@@ -99,25 +99,20 @@ const translations = {
     quality_desc: "(P<BV 或 五年EPS>0 或 PE<20)",
     copy_sync_link: "複製同步連結",
     link_copied: "已複製！",
-    sync_center: "跨裝置同步中心",
-    sync_desc: "在您的手機或其他裝置之間快速同步最近查詢歷史",
-    qr_sync: "QR Code 掃描同步",
-    qr_sync_desc: "使用另一台裝置（如手機）掃描下方條碼即可立刻同步，會自動提供合併選項！",
-    cloud_sync: "雲端同步碼",
-    cloud_sync_desc: "使用免註冊雲端同步碼，免登入、跨設備極速對接",
-    get_sync_code: "產生同步金鑰",
-    enter_sync_code: "輸入他端同步碼",
-    sync_btn: "確認同步",
-    sync_code_label: "您的專屬同步碼 (5分鐘內有效)",
-    sync_success: "同步成功！已載入全新紀錄",
-    sync_failed: "同步失敗，請檢查網路或同步碼是否正確",
-    sync_uploading: "正在上傳至雲端...",
-    sync_downloading: "正在從雲端載入...",
-    merge_title: "發現來自其他裝置的查詢紀錄",
-    merge_sub: "是否要與本機現有的查詢紀錄進行合併？",
-    merge_btn: "合併兩端紀錄",
-    overwrite_btn: "覆蓋本機紀錄",
-    cancel_merge: "保留本機不變"
+    sync_center: "GitHub 自動同步中心",
+    sync_desc: "將您的最近查詢儲存在您專屬的 GitHub 儲存庫，實現私密且免登入的跨設備自動同步",
+    github_sync: "GitHub 自動同步",
+    github_sync_desc: "輸入您的 Token 和 Repository 資訊後，本機的最近查詢將會自動且無感地在背景推送至 GitHub，其他裝置（如手機）只需輸入相同 Repo 名稱便能背景自動拉取並默默合併！",
+    github_token: "GitHub 個人存取金鑰 (PAT)",
+    github_repo: "GitHub 儲存庫 (owner/repo)",
+    github_branch: "分支 (Branch)",
+    save_settings: "儲存並測試連線",
+    test_success: "連線測試成功！已與 GitHub 雙向同步",
+    test_failed: "連線測試失敗，請確認 Token 與儲存庫設定",
+    sync_success: "GitHub 同步成功！已載入最新歷史紀錄",
+    sync_failed: "GitHub 同步失敗，請檢查網路或 Token 設定",
+    sync_uploading: "正在上傳至 GitHub 雲端...",
+    sync_downloading: "正在自 GitHub 雲端拉取..."
   },
   en: {
     syncing: "Syncing global markets...",
@@ -198,25 +193,20 @@ const translations = {
     quality_desc: "(P<BV or 5Y EPS>0 or PE<20)",
     copy_sync_link: "Copy Sync Link",
     link_copied: "Copied!",
-    sync_center: "Cross-Device Sync Center",
-    sync_desc: "Quickly sync your search history across phones and computers",
-    qr_sync: "QR Code Scan Sync",
-    qr_sync_desc: "Scan the QR code below with another device to sync and get merge options!",
-    cloud_sync: "Cloud Sync Key",
-    cloud_sync_desc: "No registration required, sync across devices via custom temporary codes",
-    get_sync_code: "Generate Sync Key",
-    enter_sync_code: "Enter Sync Key",
-    sync_btn: "Sync Now",
-    sync_code_label: "Your Sync Key (Active for 5 minutes)",
-    sync_success: "Sync successful! Loaded new history",
-    sync_failed: "Sync failed, please check connection or sync key",
-    sync_uploading: "Uploading to cloud...",
-    sync_downloading: "Downloading from cloud...",
-    merge_title: "Incoming History Detected",
-    merge_sub: "Would you like to merge this with your local search history?",
-    merge_btn: "Merge Records",
-    overwrite_btn: "Overwrite Local",
-    cancel_merge: "Keep Local Only"
+    sync_center: "GitHub Auto Sync Center",
+    sync_desc: "Store your search history in your own GitHub repository for a private, serverless cross-device sync.",
+    github_sync: "GitHub Auto Sync",
+    github_sync_desc: "Enter your Token and Repository. Your local search history will automatically and seamlessly push to GitHub. Other devices only need the same repository name to silently pull and merge!",
+    github_token: "GitHub Personal Access Token (PAT)",
+    github_repo: "GitHub Repository (owner/repo)",
+    github_branch: "Branch",
+    save_settings: "Save & Test Connection",
+    test_success: "Connection successful! Synced with GitHub",
+    test_failed: "Connection failed. Please check Token or Repository settings",
+    sync_success: "GitHub Sync successful! Loaded latest history",
+    sync_failed: "GitHub Sync failed. Please check network or Token",
+    sync_uploading: "Pushing to GitHub...",
+    sync_downloading: "Pulling from GitHub..."
   }
 };
 
@@ -249,53 +239,123 @@ const buildHashString = (history) => {
 };
 
 // =============================================
-// Cloud Sync Helper
+// GitHub Sync Helper
 // =============================================
 
-const cloudSync = {
-  // 隨機生成 6 碼大寫英數同步碼
-  generateCode() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let code = '';
-    for (let i = 0; i < 6; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return code;
+const gitHubSync = {
+  // 安全地將 UTF-8 字串編碼成 Base64 (防止中文亂碼)
+  utf8ToB64(str) {
+    return btoa(unescape(encodeURIComponent(str)));
   },
-  
-  // 上傳最近查詢歷史
-  async upload(code, history) {
+
+  // 安全地將 Base64 解碼成 UTF-8 字串 (防止中文亂碼)
+  b64ToUtf8(str) {
+    return decodeURIComponent(escape(atob(str)));
+  },
+
+  // 解析 owner/repo 字串
+  parseRepo(repoStr) {
+    const clean = (repoStr || '').trim().replace(/^(https?:\/\/github\.com\/)/, '');
+    const parts = clean.split('/');
+    if (parts.length >= 2) {
+      return { owner: parts[0], repo: parts[1] };
+    }
+    return null;
+  },
+
+  // 從 GitHub 拉取歷史紀錄 (支援 Token 讀取與免 Token 唯讀 Public Raw 讀取)
+  async download(repoStr, token, branch = 'main') {
+    const parsed = this.parseRepo(repoStr);
+    if (!parsed) throw new Error('儲存庫格式不正確');
+    const { owner, repo } = parsed;
+
     try {
-      const response = await fetch(`https://api.keyvalue.xyz/key/sv_hist_v1_${code}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(history)
-      });
-      if (!response.ok) throw new Error('上傳失敗');
-      return true;
+      // 1. 如果有 Token，優先使用 API，可以取得 SHA 且不受 Rate Limit 影響
+      if (token && token.trim()) {
+        const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/data/recent_queries.json?ref=${branch}`, {
+          headers: {
+            'Authorization': `token ${token.trim()}`,
+            'Accept': 'application/vnd.github.v3+json'
+          }
+        });
+
+        if (response.ok) {
+          const fileData = await response.json();
+          const jsonStr = this.b64ToUtf8(fileData.content);
+          const history = JSON.parse(jsonStr);
+          return { history: Array.isArray(history) ? history : [], sha: fileData.sha };
+        } else if (response.status === 404) {
+          // 檔案尚不存在
+          return { history: [], sha: null };
+        }
+        throw new Error('API 下載失敗');
+      } 
+      
+      // 2. 如果無 Token，則直接 fetch Public Raw URL 實現免驗證唯讀同步
+      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/data/recent_queries.json?t=${Date.now()}`;
+      const response = await fetch(rawUrl);
+      if (response.ok) {
+        const history = await response.json();
+        return { history: Array.isArray(history) ? history : [], sha: null };
+      } else if (response.status === 404) {
+        return { history: [], sha: null };
+      }
+      throw new Error('Raw 下載失敗');
     } catch (e) {
-      console.error("Cloud sync upload error:", e);
+      console.error("GitHub sync download error:", e);
       throw e;
     }
   },
-  
-  // 下載最近查詢歷史
-  async download(code) {
+
+  // 推送更新至 GitHub (需要 Token)
+  async upload(repoStr, token, history, branch = 'main') {
+    const parsed = this.parseRepo(repoStr);
+    if (!parsed) throw new Error('儲存庫格式不正確');
+    const { owner, repo } = parsed;
+    if (!token || !token.trim()) throw new Error('需要 GitHub Token 才能寫入');
+
     try {
-      const response = await fetch(`https://api.keyvalue.xyz/key/sv_hist_v1_${code}`);
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error('找不到此同步碼，請確認是否輸入正確或已過期。');
+      // A. 先獲取目前的 SHA 值 (若檔案已存在則必須帶上 SHA 才能更新)
+      let sha = null;
+      const getResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/data/recent_queries.json?ref=${branch}`, {
+        headers: {
+          'Authorization': `token ${token.trim()}`,
+          'Accept': 'application/vnd.github.v3+json'
         }
-        throw new Error('下載失敗');
+      });
+      if (getResponse.ok) {
+        const fileData = await getResponse.json();
+        sha = fileData.sha;
       }
-      const data = await response.json();
-      if (!Array.isArray(data)) throw new Error('資料格式不正確');
-      return data;
+
+      // B. 執行上傳
+      const jsonStr = JSON.stringify(history);
+      const b64Content = this.utf8ToB64(jsonStr);
+
+      const body = {
+        message: 'chore: sync stock vision search history [silent]',
+        content: b64Content,
+        branch
+      };
+      if (sha) body.sha = sha;
+
+      const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/data/recent_queries.json`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `token ${token.trim()}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/vnd.github.v3+json'
+        },
+        body: JSON.stringify(body)
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.message || '上傳更新失敗');
+      }
+      return true;
     } catch (e) {
-      console.error("Cloud sync download error:", e);
+      console.error("GitHub sync upload error:", e);
       throw e;
     }
   }
@@ -725,11 +785,24 @@ const Dashboard = () => {
   // 同步中心相關 State
   const [showSyncModal, setShowSyncModal] = useState(false);
   
-  // 雲端同步相關 State
-  const [syncCode, setSyncCode] = useState('');
-  const [inputSyncCode, setInputSyncCode] = useState('');
+  // GitHub 同步配置與狀態
+  const [githubToken, setGithubToken] = useState(() => localStorage.getItem('sv_github_token') || '');
+  const [githubRepo, setGithubRepo] = useState(() => localStorage.getItem('sv_github_repo') || 'needlovechen-rgb/stock-vision');
+  const [githubBranch, setGithubBranch] = useState(() => localStorage.getItem('sv_github_branch') || 'main');
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState('');
+
+  const [tempToken, setTempToken] = useState(githubToken);
+  const [tempRepo, setTempRepo] = useState(githubRepo);
+  const [tempBranch, setTempBranch] = useState(githubBranch);
+
+  useEffect(() => {
+    if (showSyncModal) {
+      setTempToken(githubToken);
+      setTempRepo(githubRepo);
+      setTempBranch(githubBranch);
+    }
+  }, [showSyncModal, githubToken, githubRepo, githubBranch]);
 
   const [linkCopied, setLinkCopied] = useState(false);
   const [lang, setLang] = useState(() => localStorage.getItem('stock_vision_lang') || 'zh');
@@ -766,19 +839,66 @@ const Dashboard = () => {
     }
   }, [searchHistory]);
 
-  // 檢查 URL Hash 並自動與本機歷史進行默默合併 (無需確認)
+  // 1. 網頁載入時自動從 GitHub 拉取最新歷史紀錄並默默合併 (無需確認)
+  useEffect(() => {
+    const autoPull = async () => {
+      if (!githubRepo) return;
+      try {
+        const { history: cloudHistory } = await gitHubSync.download(githubRepo, githubToken, githubBranch);
+        if (cloudHistory && cloudHistory.length > 0) {
+          setSearchHistory(prev => {
+            const mergedMap = new Map();
+            // 雲端的排前面
+            cloudHistory.forEach(h => {
+              const sym = typeof h === 'string' ? h : h.symbol;
+              const name = typeof h === 'string' ? '' : h.name;
+              mergedMap.set(sym, name);
+            });
+            // 本地的補在後面
+            prev.forEach(h => {
+              const sym = typeof h === 'string' ? h : h.symbol;
+              const name = typeof h === 'string' ? '' : h.name;
+              if (!mergedMap.has(sym)) {
+                mergedMap.set(sym, name);
+              }
+            });
+            const merged = Array.from(mergedMap.entries()).map(([symbol, name]) => ({ symbol, name }));
+            return merged.slice(0, 20);
+          });
+        }
+      } catch (e) {
+        console.error("Auto pull from GitHub failed", e);
+      }
+    };
+    autoPull();
+  }, []); // 僅在初次載入時自動拉取一次
+
+  // 2. 歷史紀錄改變時，在背景自動默默推送至 GitHub (若有 Token，採用 3 秒防抖機制)
+  useEffect(() => {
+    const autoPush = async () => {
+      if (!githubToken || !githubRepo || searchHistory.length === 0) return;
+      try {
+        await gitHubSync.upload(githubRepo, githubToken, searchHistory, githubBranch);
+      } catch (e) {
+        console.error("Auto push to GitHub failed", e);
+      }
+    };
+    
+    const timer = setTimeout(autoPush, 3000);
+    return () => clearTimeout(timer);
+  }, [searchHistory, githubToken, githubRepo, githubBranch]);
+
+  // 3. 檢查 URL Hash 並自動與本機歷史進行默默合併 (雙軌並存)
   useEffect(() => {
     const fromHash = parseHashHistory();
     if (fromHash.length > 0) {
       setSearchHistory(prev => {
         const mergedMap = new Map();
-        // 外來的排前面
         fromHash.forEach(h => {
           const sym = typeof h === 'string' ? h : h.symbol;
           const name = typeof h === 'string' ? '' : h.name;
           mergedMap.set(sym, name);
         });
-        // 本地的補在後面
         prev.forEach(h => {
           const sym = typeof h === 'string' ? h : h.symbol;
           const name = typeof h === 'string' ? '' : h.name;
@@ -789,10 +909,9 @@ const Dashboard = () => {
         const merged = Array.from(mergedMap.entries()).map(([symbol, name]) => ({ symbol, name }));
         return merged.slice(0, 20);
       });
-      // 默默清除 URL hash
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
-  }, []); // 僅在初次掛載時執行
+  }, []);
 
   // Sync quality stocks to localStorage
   useEffect(() => {
@@ -891,61 +1010,62 @@ const Dashboard = () => {
     }
   }, [assumptions]);
 
-  const handleGenerateCloudCode = useCallback(async () => {
-    setSyncLoading(true);
-    setSyncStatusMsg(t('sync_uploading'));
-    try {
-      const code = cloudSync.generateCode();
-      await cloudSync.upload(code, searchHistory);
-      setSyncCode(code);
-      setSyncStatusMsg('');
-    } catch (e) {
-      setSyncStatusMsg(t('sync_failed'));
-    } finally {
-      setSyncLoading(false);
-    }
-  }, [searchHistory, t]);
-
-  const handleApplyCloudCode = useCallback(async () => {
-    const code = inputSyncCode.trim().toUpperCase();
-    if (!code) return;
+  const handleSaveGitHubSettings = useCallback(async (token, repo, branch) => {
     setSyncLoading(true);
     setSyncStatusMsg(t('sync_downloading'));
     try {
-      const data = await cloudSync.download(code);
-      if (Array.isArray(data)) {
-        setSearchHistory(prev => {
-          const mergedMap = new Map();
-          // 外來下載的排前面
-          data.forEach(h => {
+      // 1. 測試下載
+      const { history: cloudHistory } = await gitHubSync.download(repo, token, branch);
+      
+      // 2. 下載成功，將其與本機歷史合併
+      let mergedHistory = searchHistory;
+      setSearchHistory(prev => {
+        const mergedMap = new Map();
+        if (cloudHistory && cloudHistory.length > 0) {
+          cloudHistory.forEach(h => {
             const sym = typeof h === 'string' ? h : h.symbol;
             const name = typeof h === 'string' ? '' : h.name;
             mergedMap.set(sym, name);
           });
-          // 本地的補在後面
-          prev.forEach(h => {
-            const sym = typeof h === 'string' ? h : h.symbol;
-            const name = typeof h === 'string' ? '' : h.name;
-            if (!mergedMap.has(sym)) {
-              mergedMap.set(sym, name);
-            }
-          });
-          const merged = Array.from(mergedMap.entries()).map(([symbol, name]) => ({ symbol, name }));
-          return merged.slice(0, 20);
+        }
+        prev.forEach(h => {
+          const sym = typeof h === 'string' ? h : h.symbol;
+          const name = typeof h === 'string' ? '' : h.name;
+          if (!mergedMap.has(sym)) {
+            mergedMap.set(sym, name);
+          }
         });
-        setSyncStatusMsg(t('sync_success'));
-        setInputSyncCode('');
-        setTimeout(() => {
-          setShowSyncModal(false);
-          setSyncStatusMsg('');
-        }, 1500);
+        const merged = Array.from(mergedMap.entries()).map(([symbol, name]) => ({ symbol, name })).slice(0, 20);
+        mergedHistory = merged;
+        return merged;
+      });
+
+      // 3. 將這些設定寫入本機 localStorage 中
+      localStorage.setItem('sv_github_token', token.trim());
+      localStorage.setItem('sv_github_repo', repo.trim());
+      localStorage.setItem('sv_github_branch', branch.trim());
+      
+      setGithubToken(token.trim());
+      setGithubRepo(repo.trim());
+      setGithubBranch(branch.trim());
+
+      // 4. 如果有 Token，順便把剛才合併好的歷史 push 上去，完成雙向對接
+      if (token.trim()) {
+        setSyncStatusMsg(t('sync_uploading'));
+        await gitHubSync.upload(repo.trim(), token.trim(), mergedHistory, branch.trim());
       }
+
+      setSyncStatusMsg(t('test_success'));
+      setTimeout(() => {
+        setShowSyncModal(false);
+        setSyncStatusMsg('');
+      }, 1500);
     } catch (e) {
-      setSyncStatusMsg(t('sync_failed'));
+      setSyncStatusMsg(t('test_failed'));
     } finally {
       setSyncLoading(false);
     }
-  }, [inputSyncCode, t]);
+  }, [searchHistory, t]);
 
   const valuationData = useMemo(() => {
     if (!stockInfo?.valuation) return null;
@@ -2525,7 +2645,6 @@ const Dashboard = () => {
                   onClick={() => {
                     setShowSyncModal(false);
                     setSyncStatusMsg('');
-                    setSyncCode('');
                   }} 
                   className="p-1.5 hover:bg-white/5 rounded-full text-slate-400 hover:text-white transition-colors"
                 >
@@ -2536,82 +2655,78 @@ const Dashboard = () => {
               {/* Body */}
               <div className="p-6 space-y-6">
                 
-                {/* QR Code Section */}
-                <div className="bg-white/[0.02] border border-white/5 p-5 rounded-2xl flex flex-col sm:flex-row items-center gap-6">
-                  <div className="bg-white p-3 rounded-2xl shadow-lg border border-violet-500/20 shrink-0">
-                    <img 
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(window.location.href)}&color=020617`} 
-                      alt="Sync QR Code"
-                      className="w-[120px] h-[120px]"
+                {/* Intro Card */}
+                <div className="bg-white/[0.02] border border-white/5 p-5 rounded-2xl space-y-2">
+                  <h4 className="text-xs font-black uppercase text-violet-400 tracking-wider flex items-center gap-1.5">
+                    <Cloud size={12} /> {t('github_sync')}
+                  </h4>
+                  <p className="text-xs text-slate-400 leading-relaxed font-bold">
+                    {t('github_sync_desc')}
+                  </p>
+                </div>
+
+                {/* Configuration Fields */}
+                <div className="space-y-4">
+                  {/* Repo */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">
+                      {t('github_repo')} <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. needlovechen-rgb/stock-vision"
+                      value={tempRepo}
+                      onChange={(e) => setTempRepo(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-xs font-bold text-white placeholder-slate-600 focus:outline-none focus:border-violet-500 transition-colors"
                     />
                   </div>
-                  <div className="space-y-2 text-center sm:text-left">
-                    <h4 className="text-xs font-black uppercase text-violet-400 tracking-wider flex items-center gap-1.5 justify-center sm:justify-start">
-                      <Share2 size={12} /> {t('qr_sync')}
-                    </h4>
-                    <p className="text-xs text-slate-400 leading-relaxed font-bold">
-                      {t('qr_sync_desc')}
-                    </p>
+
+                  {/* Token */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">
+                      {t('github_token')}
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxx"
+                      value={tempToken}
+                      onChange={(e) => setTempToken(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-xs font-bold text-white placeholder-slate-600 focus:outline-none focus:border-violet-500 transition-colors"
+                    />
+                  </div>
+
+                  {/* Branch */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider">
+                      {t('github_branch')}
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="main"
+                      value={tempBranch}
+                      onChange={(e) => setTempBranch(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-xs font-bold text-white placeholder-slate-600 focus:outline-none focus:border-violet-500 transition-colors"
+                    />
                   </div>
                 </div>
 
-                {/* Cloud Sync Section */}
-                <div className="bg-white/[0.02] border border-white/5 p-5 rounded-2xl space-y-4">
-                  <h4 className="text-xs font-black uppercase text-violet-400 tracking-wider flex items-center gap-1.5">
-                    <Cloud size={12} /> {t('cloud_sync')}
-                  </h4>
-                  <p className="text-xs text-slate-400 leading-relaxed font-bold">
-                    {t('cloud_sync_desc')}
-                  </p>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                    {/* Generate Code */}
-                    <div className="space-y-2">
-                      <button
-                        onClick={handleGenerateCloudCode}
-                        disabled={syncLoading}
-                        className="w-full py-2.5 bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800/50 rounded-xl text-xs font-black transition-colors flex items-center justify-center gap-2 active:scale-[0.98]"
-                      >
-                        <UploadCloud size={14} />
-                        {t('get_sync_code')}
-                      </button>
-                      
-                      {syncCode && (
-                        <div className="text-center p-2 bg-violet-500/10 border border-violet-500/20 rounded-xl">
-                          <span className="text-[10px] text-slate-500 font-bold uppercase block">{t('sync_code_label')}</span>
-                          <span className="text-xl font-black text-violet-400 tracking-widest">{syncCode}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Apply Code */}
-                    <div className="space-y-2">
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          maxLength={6}
-                          placeholder="EX: A7B9C3"
-                          value={inputSyncCode}
-                          onChange={(e) => setInputSyncCode(e.target.value.toUpperCase())}
-                          className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-xl text-xs font-bold text-center text-white placeholder-slate-600 focus:outline-none focus:border-violet-500 tracking-wider"
-                        />
-                        <button
-                          onClick={handleApplyCloudCode}
-                          disabled={syncLoading || inputSyncCode.length < 6}
-                          className="px-4 py-2 bg-white/10 hover:bg-white/20 disabled:bg-white/5 disabled:text-slate-600 rounded-xl text-xs font-black transition-colors flex items-center justify-center gap-1.5 active:scale-[0.98]"
-                        >
-                          <DownloadCloud size={14} />
-                          {t('sync_btn')}
-                        </button>
-                      </div>
-                    </div>
+                {/* Status Message */}
+                {syncStatusMsg && (
+                  <div className="text-center text-xs font-black text-violet-400 bg-violet-500/10 border border-violet-500/20 py-2.5 rounded-xl animate-pulse">
+                    {syncStatusMsg}
                   </div>
+                )}
 
-                  {syncStatusMsg && (
-                    <div className="text-center text-xs font-bold text-slate-400 pt-2 animate-pulse">
-                      {syncStatusMsg}
-                    </div>
-                  )}
+                {/* Actions */}
+                <div className="pt-2">
+                  <button
+                    onClick={() => handleSaveGitHubSettings(tempToken, tempRepo, tempBranch)}
+                    disabled={syncLoading || !tempRepo.trim()}
+                    className="w-full py-3 bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800/50 rounded-2xl text-xs font-black transition-colors flex items-center justify-center gap-2 active:scale-[0.98]"
+                  >
+                    <UploadCloud size={14} className={syncLoading ? "animate-spin" : ""} />
+                    {t('save_settings')}
+                  </button>
                 </div>
 
               </div>
